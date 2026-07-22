@@ -61,31 +61,36 @@ in-process — the agent is an MCP *client* that talks to a tool server over
 stdio:
 
 ```
-┌───────────┐     ┌────────────┐     ┌──────────────┐
-│  CLI/REPL │ --> │ agent loop │ --> │ intent parser│
-└───────────┘     │ (call model│     │ (task ->     │
-                  │  approve,  │     │  structured  │
-                  │  execute,  │     │  intent)     │
-                  │  persist)  │     └──────────────┘
-                  └─────┬──────┘
-       ┌────────────────┼─────────────────┐
-       ▼                ▼                 ▼
-┌───────────────┐ ┌───────────────┐ ┌───────────────────┐
-│ model client  │ │  MCP client   │ │  session store    │
-│ (chat calls)  │ │ (MCP session) │ │  (SQLite history) │
-└───────────────┘ └───────┬───────┘ └───────────────────┘
-                          │ stdio subprocess
-                          ▼
-                   ┌───────────────┐
-                   │  MCP server   │
-                   └───────┬───────┘
-                           ▼
-                   ┌───────────────┐
-                   │     tools     │
-                   │ (read/write/  │
-                   │ edit/search/  │
-                   │    shell)     │
-                   └───────────────┘
++-----------------------------+
+|          CLI / REPL         |
++-----------------------------+
+               |
+               v
++-----------------------------+
+|          Agent loop         |
+|  parse intent, call model,  |
+|  approve, execute, persist  |
++-----------------------------+
+               |
+               v
++-----------------------------+
+|          MCP client         |
+|  built-in + custom servers  |
+|  merged into one tool list  |
++-----------------------------+
+               |
+ stdio / SSE / streamable-http
+               v
++-----------------------------+
+|        MCP server(s)        |
++-----------------------------+
+               |
+               v
++-----------------------------+
+|            Tools            |
+|    read / write / edit /    |
+|        search / shell       |
++-----------------------------+
 ```
 
 Because tools are exposed over MCP, any MCP-compatible client — Claude

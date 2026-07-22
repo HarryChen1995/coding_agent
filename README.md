@@ -162,32 +162,42 @@ converts it to Ollama's function-calling schema, and calls tools through the
 MCP session instead of Python function calls directly.
 
 ```
-┌───────────┐     ┌────────────┐     ┌──────────────┐
-│  cli.py   │ --> │  agent.py  │ --> │  intent.py   │
-│ (Typer    │     │ (call model│     │ (task ->     │
-│  CLI/REPL)│     │  approve,  │     │  structured  │
-└───────────┘     │  execute,  │     │  intent)     │
-                   │  persist)  │     └──────────────┘
-                   └─────┬──────┘
-        ┌────────────────┼─────────────────┐
-        ▼                ▼                 ▼
-┌───────────────┐ ┌───────────────┐ ┌───────────────────┐
-│ollama_client.py│ │ mcp_client.py │ │ session_store.py  │
-│ (model calls) │ │ (MCP session) │ │ (SQLite history)  │
-└───────────────┘ └───────┬───────┘ └───────────────────┘
-                           │ stdio subprocess
-                           ▼
-                   ┌───────────────┐
-                   │ mcp_server.py │
-                   └───────┬───────┘
-                           ▼
-                   ┌───────────────┐
-                   │   tools.py    │
-                   │ (read/write/  │
-                   │  edit/shell,  │
-                   │  scoped to    │
-                   │ project root) │
-                   └───────────────┘
++------------------------------------------+
+|        cli.py  (Typer CLI / REPL)        |
++------------------------------------------+
+                     |
+                     v
++------------------------------------------+
+|                 agent.py                 |
+|    call model, parse intent, approve,    |
+|      execute tools, persist, repeat      |
++------------------------------------------+
+                     |
+                     v
++------------------------------------------+
+|      ollama_client.py (model calls)      |
+|    session_store.py (SQLite history)     |
++------------------------------------------+
+                     |
+                     v
++------------------------------------------+
+|              mcp_client.py               |
+|     built-in + custom servers merged     |
+|      into one namespaced tool list       |
++------------------------------------------+
+                     |
+       stdio / SSE / streamable-http
+                     v
++------------------------------------------+
+|  mcp_server.py  /  custom MCP server(s)  |
++------------------------------------------+
+                     |
+                     v
++------------------------------------------+
+|                 tools.py                 |
+|  read / write / edit / search / shell,   |
+|       each scoped to project_root        |
++------------------------------------------+
 ```
 
 What this buys you:
