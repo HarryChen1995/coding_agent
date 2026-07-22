@@ -40,6 +40,22 @@ def save_mcp_config(path: str, servers: dict) -> None:
         f.write("\n")
 
 
+def _split_command(s: str) -> list:
+    """Split a command string into tokens, Windows-path-safe. shlex.split()'s
+    default POSIX mode treats backslash as an escape character, which
+    silently eats every backslash in a Windows path (`C:\\Users\\...` becomes
+    `C:Users...`) — so split in non-POSIX mode instead (preserves backslashes
+    literally) and manually strip matching quotes non-POSIX mode leaves on
+    quoted tokens."""
+    tokens = shlex.split(s, posix=False)
+    cleaned = []
+    for t in tokens:
+        if len(t) >= 2 and t[0] == t[-1] and t[0] in ('"', "'"):
+            t = t[1:-1]
+        cleaned.append(t)
+    return cleaned
+
+
 def parse_mcp_server_specs(specs: list) -> dict:
     """Parse repeatable `--mcp-server` CLI values into the same shape
     load_mcp_config() returns, so both sources can be merged uniformly.
@@ -68,7 +84,7 @@ def parse_mcp_server_specs(specs: list) -> dict:
                 raise ValueError(f"Invalid --mcp-server transport {transport!r} for {name!r} — expected one of {_TRANSPORTS}")
             servers[name] = {"url": url, "transport": transport}
         else:
-            parts = shlex.split(rest)
+            parts = _split_command(rest)
             if not parts:
                 raise ValueError(f'Invalid --mcp-server value {spec!r} — expected "name=command args..."')
             servers[name] = {"command": parts[0], "args": parts[1:]}
