@@ -1,5 +1,5 @@
 """Tool implementations. Every tool that touches disk or a shell goes
-through the sandbox path check first.
+through the project-scope path check first.
 """
 
 import difflib
@@ -18,18 +18,18 @@ _IGNORE_DIRS = {
 }
 
 
-class SandboxError(Exception):
+class PathScopeError(Exception):
     pass
 
 
-def _resolve_in_sandbox(root: str, path: str) -> str:
+def _resolve_in_scope(root: str, path: str) -> str:
     """Resolve `path` relative to `root` and reject any escape attempt
     (../, absolute paths outside root, symlink tricks)."""
     root_abs = os.path.realpath(root)
     candidate = path if os.path.isabs(path) else os.path.join(root_abs, path)
     candidate_abs = os.path.realpath(candidate)
     if not (candidate_abs == root_abs or candidate_abs.startswith(root_abs + os.sep)):
-        raise SandboxError(
+        raise PathScopeError(
             f"Path '{path}' resolves outside the project root ({root_abs}) — denied."
         )
     return candidate_abs
@@ -42,8 +42,8 @@ def _truncate(text: str, limit: int) -> str:
 
 
 class Tools:
-    """Bound to a single AgentConfig so every call is sandboxed and logged
-    the same way."""
+    """Bound to a single AgentConfig so every call is scoped to the project
+    root and logged the same way."""
 
     def __init__(self, cfg: AgentConfig):
         self.cfg = cfg
@@ -51,7 +51,7 @@ class Tools:
     # ---- read-only tools (safe by default) ----
 
     def read_file(self, path: str, start_line: int = None, end_line: int = None) -> str:
-        p = _resolve_in_sandbox(self.cfg.project_root, path)
+        p = _resolve_in_scope(self.cfg.project_root, path)
         if not os.path.isfile(p):
             return f"ERROR: {path} does not exist"
         with open(p, "r", encoding="utf-8", errors="replace") as f:
@@ -63,17 +63,17 @@ class Tools:
         return _truncate("".join(lines), self.cfg.max_output_chars)
 
     def file_exists(self, path: str) -> bool:
-        """Sandboxed existence check — used to validate parsed intent
-        (e.g. flag target files that don't exist yet) without paying the
-        cost of a full read_file call."""
+        """Existence check confined to the project root — used to validate
+        parsed intent (e.g. flag target files that don't exist yet) without
+        paying the cost of a full read_file call."""
         try:
-            p = _resolve_in_sandbox(self.cfg.project_root, path)
+            p = _resolve_in_scope(self.cfg.project_root, path)
             return os.path.isfile(p)
-        except SandboxError:
+        except PathScopeError:
             return False
 
     def list_dir(self, path: str = ".") -> str:
-        p = _resolve_in_sandbox(self.cfg.project_root, path)
+        p = _resolve_in_scope(self.cfg.project_root, path)
         if not os.path.isdir(p):
             return f"ERROR: {path} is not a directory"
         entries = sorted(os.listdir(p))
@@ -84,7 +84,7 @@ class Tools:
         """Regex search across files under `path`, skipping noise directories
         (.git, node_modules, __pycache__, build output, etc.). `glob`
         optionally restricts which filenames are searched (e.g. "*.py")."""
-        p = _resolve_in_sandbox(self.cfg.project_root, path)
+        p = _resolve_in_scope(self.cfg.project_root, path)
         try:
             regex = re.compile(pattern, re.IGNORECASE if case_insensitive else 0)
         except re.error as e:
@@ -124,7 +124,7 @@ class Tools:
         """Find files by glob pattern (supports ** for recursive matching),
         e.g. "**/*.tsx" or "src/**/test_*.py". Results are sorted newest
         first, like Claude Code's Glob tool, skipping noise directories."""
-        root = _resolve_in_sandbox(self.cfg.project_root, path)
+        root = _resolve_in_scope(self.cfg.project_root, path)
         matches = globmod.glob(os.path.join(root, pattern), recursive=True)
 
         files = []
@@ -148,7 +148,7 @@ class Tools:
         return out
 
     def git_diff(self, path: str = ".") -> str:
-        p = _resolve_in_sandbox(self.cfg.project_root, path)
+        p = _resolve_in_scope(self.cfg.project_root, path)
         try:
             result = subprocess.run(
                 ["git", "diff"], cwd=p, capture_output=True, text=True, timeout=15,
@@ -160,7 +160,7 @@ class Tools:
     # ---- write tools (require approval unless auto_approve) ----
 
     def write_file(self, path: str, content: str, overwrite: bool = False) -> str:
-        p = _resolve_in_sandbox(self.cfg.project_root, path)
+        p = _resolve_in_scope(self.cfg.project_root, path)
         if os.path.exists(p) and not overwrite:
             return (f"ERROR: {path} already exists. Use edit_file to modify it, "
                      f"or pass overwrite=true to replace it entirely.")
@@ -173,7 +173,7 @@ class Tools:
         """Dry-run version of edit_file — validates and computes the diff
         WITHOUT writing anything. Returns (ok: bool, message: str) where
         message is either the diff (ok=True) or an error (ok=False)."""
-        p = _resolve_in_sandbox(self.cfg.project_root, path)
+        p = _resolve_in_scope(self.cfg.project_root, path)
         if not os.path.isfile(p):
             return False, f"{path} does not exist"
         with open(p, "r", encoding="utf-8") as f:
@@ -194,7 +194,7 @@ class Tools:
         """Dry-run version of write_file. Returns (is_new: bool, preview: str).
         If the file exists and overwrite=True, preview is a diff; if it's a
         new file, preview is the content itself (syntax-highlighted by the UI)."""
-        p = _resolve_in_sandbox(self.cfg.project_root, path)
+        p = _resolve_in_scope(self.cfg.project_root, path)
         if os.path.isfile(p) and overwrite:
             with open(p, "r", encoding="utf-8") as f:
                 original = f.read()
@@ -209,7 +209,7 @@ class Tools:
         """Find-and-replace that requires an exact, unique match — same
         discipline as Claude's own str_replace tool, to avoid silently
         editing the wrong spot."""
-        p = _resolve_in_sandbox(self.cfg.project_root, path)
+        p = _resolve_in_scope(self.cfg.project_root, path)
         if not os.path.isfile(p):
             return f"ERROR: {path} does not exist"
         with open(p, "r", encoding="utf-8") as f:

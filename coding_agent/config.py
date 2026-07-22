@@ -33,6 +33,16 @@ class AgentConfig:
     log_path: str = "agent_run.log"
     db_path: str = "agent_sessions.db"  # SQLite file storing session/message history
 
+    # Optional path to a Claude-Desktop-style MCP config file
+    # ({"mcpServers": {"name": {"command": ..., "args": [...], "env": {...}}}})
+    # for adding extra tool servers beyond the built-in one. Empty = none.
+    mcp_config_path: str = ""
+
+    # Extra MCP servers specified directly (e.g. via repeatable --mcp-server
+    # CLI flags), as {name: {"command": ..., "args": [...], "env": {...}}}.
+    # Merged with mcp_config_path's servers; wins on a name clash.
+    mcp_servers: dict = field(default_factory=dict)
+
     # Commands the agent is never allowed to run, regardless of approval.
     denied_shell_patterns: tuple = field(default_factory=lambda: (
         "rm -rf /", "rm -rf /*", ":(){ :|:& };:", "mkfs", "dd if=",

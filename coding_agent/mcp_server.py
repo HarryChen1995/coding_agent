@@ -1,11 +1,11 @@
-"""MCP server exposing the sandboxed coding tools.
+"""MCP server exposing the coding tools, each scoped to a project root.
 
 Run standalone to test with any MCP client:
-    AGENT_PROJECT_ROOT=/path/to/repo python mcp_server.py
+    AGENT_PROJECT_ROOT=/path/to/repo python -m coding_agent.mcp_server
 
 Any MCP-compatible client (not just this agent) can now use these tools —
 Claude Desktop, another agent framework, etc. — all sharing the same
-sandbox/approval-preview logic in tools.py.
+project-scope/approval-preview logic in tools.py.
 """
 
 import os
@@ -101,7 +101,7 @@ def _preview_write(path: str, content: str, overwrite: bool = False) -> str:
 
 @mcp.tool()
 def _file_exists(path: str) -> str:
-    """Internal: sandboxed existence check for intent validation."""
+    """Internal: existence check confined to the project root, for intent validation."""
     return "true" if impl.file_exists(path) else "false"
 
 

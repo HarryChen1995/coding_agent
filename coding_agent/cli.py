@@ -18,20 +18,33 @@ Examples:
     python cli.py                      # no task -> interactive REPL, fresh session
     python cli.py --resume refactor-utils   # no task -> interactive REPL, resumed session
 
+    python cli.py --mcp-server "weather=python -m weather_mcp_server" \\
+        --mcp-server "docs=node docs-server.js --port 4000" "Look up today's forecast"
+
+    python cli.py --add-mcp-server "weather=python -m weather_mcp_server"  # register once,
+    python cli.py "what's the forecast?"                                   # available from here on, no flags needed
+
+    python cli.py --list-mcp-servers
+    python cli.py --remove-mcp-server weather
+
     python cli.py --help
 """
 
 import asyncio
-from typing import Optional
+import os
+from typing import List, Optional
 
 import typer
 
 from .agent import CodingAgent
 from .config import AgentConfig
-from .mcp_client import MCPToolClient
+from .mcp_client import (
+    MCPToolClient, default_mcp_config_path, load_mcp_config,
+    parse_mcp_server_specs, save_mcp_config,
+)
 from .session_store import SessionStore
 
-app = typer.Typer(add_completion=False, help="Local coding agent (Ollama + Qwen Coder)")
+app = typer.Typer(add_completion=False, help="Coding agent (Ollama + Qwen Coder)")
 
 
 @app.command()
@@ -40,7 +53,7 @@ def main(
         None, help="What you want the agent to do. Optional with --resume (continues "
                    "with no new instruction) or --list-sessions.",
     ),
-    project_root: str = typer.Option(".", "--project-root", "-p", help="Sandbox directory"),
+    project_root: str = typer.Option(".", "--project-root", "-p", help="Directory the agent is scoped to"),
     model: str = typer.Option("qwen3.6:35b", "--model", "-m", help="Ollama model to drive the agent"),
     ollama_host: Optional[str] = typer.Option(
         None, "--ollama-host", help="Ollama server URL (defaults to $OLLAMA_HOST or http://localhost:11434)",
@@ -55,7 +68,7 @@ def main(
     auto_approve: bool = typer.Option(
         False, "--auto-approve",
         help="Skip human approval for write/edit/shell tools. Only use in an "
-             "already-sandboxed environment. Overridden if intent parsing flags the task high-risk.",
+             "already-isolated environment (container/VM). Overridden if intent parsing flags the task high-risk.",
     ),
     log_path: str = typer.Option("agent_run.log", "--log-path", help="Where to write the structured run log"),
     skip_intent_parsing: bool = typer.Option(
@@ -80,9 +93,68 @@ def main(
     delete_session: Optional[str] = typer.Option(
         None, "--delete-session", help="Delete a saved session (by id or --session-name) and exit",
     ),
+    mcp_config: Optional[str] = typer.Option(
+        None, "--mcp-config",
+        help='Path to a Claude-Desktop-style MCP config file ({"mcpServers": {"name": '
+             '{"command": ..., "args": [...], "env": {...}}}}) to load extra tools from, '
+             "alongside the built-in ones. Their tools appear to the model as <name>__<tool>.",
+    ),
+    mcp_server: List[str] = typer.Option(
+        [], "--mcp-server",
+        help='Add one custom MCP server inline, format "name=command arg1 arg2 ...". '
+             "Repeatable for multiple servers. Merged with --mcp-config if both are given "
+             "(this flag wins on a name clash). Its tools appear to the model as <name>__<tool>.",
+    ),
+    add_mcp_server: Optional[str] = typer.Option(
+        None, "--add-mcp-server",
+        help='Register a custom MCP server permanently (format "name=command arg1 arg2 ..."), '
+             "then exit. Saved to ~/.coding_agent/mcp.json and auto-loaded on every future run "
+             "— no need to pass --mcp-server/--mcp-config again.",
+    ),
+    remove_mcp_server: Optional[str] = typer.Option(
+        None, "--remove-mcp-server", help="Remove a permanently-registered MCP server by name, then exit",
+    ),
+    list_mcp_servers: bool = typer.Option(
+        False, "--list-mcp-servers", help="List permanently-registered MCP servers and exit",
+    ),
 ):
     """Run the coding agent on TASK inside PROJECT_ROOT. Omit TASK to enter
     an interactive session (fresh, or resumed with --resume)."""
+    if add_mcp_server:
+        try:
+            spec = parse_mcp_server_specs([add_mcp_server])
+        except ValueError as e:
+            typer.echo(f"Error: {e}", err=True)
+            raise typer.Exit(code=1)
+        path = default_mcp_config_path()
+        servers = load_mcp_config(path) if os.path.exists(path) else {}
+        servers.update(spec)
+        save_mcp_config(path, servers)
+        (name,) = spec.keys()
+        typer.echo(f"Registered MCP server {name!r} in {path} — available on every run from now on.")
+        raise typer.Exit()
+
+    if remove_mcp_server:
+        path = default_mcp_config_path()
+        servers = load_mcp_config(path) if os.path.exists(path) else {}
+        if remove_mcp_server not in servers:
+            typer.echo(f"Error: no registered MCP server named {remove_mcp_server!r}.", err=True)
+            raise typer.Exit(code=1)
+        del servers[remove_mcp_server]
+        save_mcp_config(path, servers)
+        typer.echo(f"Removed MCP server {remove_mcp_server!r}.")
+        raise typer.Exit()
+
+    if list_mcp_servers:
+        path = default_mcp_config_path()
+        servers = load_mcp_config(path) if os.path.exists(path) else {}
+        if not servers:
+            typer.echo("No registered MCP servers.")
+        else:
+            for name, spec in servers.items():
+                typer.echo(f"{name}: {spec['command']} {' '.join(spec.get('args', []))}")
+        raise typer.Exit()
+
     if delete_session:
         if SessionStore(db_path).delete_session(delete_session):
             typer.echo(f"Deleted session {delete_session!r}.")
@@ -95,6 +167,19 @@ def main(
         _print_sessions(SessionStore(db_path).list_sessions())
         raise typer.Exit()
 
+    try:
+        extra_mcp_servers = parse_mcp_server_specs(mcp_server)
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(code=1)
+
+    # Explicit --mcp-config wins; otherwise auto-load the global registry
+    # (~/.coding_agent/mcp.json) if it exists, so servers added once via
+    # --add-mcp-server are available on every run without any flags.
+    effective_mcp_config_path = mcp_config or (
+        default_mcp_config_path() if os.path.exists(default_mcp_config_path()) else ""
+    )
+
     cfg = AgentConfig(
         model=model,
         ollama_host=ollama_host or "",
@@ -106,6 +191,8 @@ def main(
         parse_intent=not skip_intent_parsing,
         intent_model=intent_model or "",
         db_path=db_path,
+        mcp_config_path=effective_mcp_config_path,
+        mcp_servers=extra_mcp_servers,
     )
 
     if task is None:
@@ -146,7 +233,8 @@ async def _interactive(cfg: AgentConfig, resume: Optional[str], session_name: Op
     if resume:
         _show_resumed_history(cfg.db_path, resume)
 
-    async with MCPToolClient(cfg.project_root) as client:
+    async with MCPToolClient(cfg.project_root, mcp_config_path=cfg.mcp_config_path or None,
+                              extra_servers=cfg.mcp_servers or None) as client:
         while True:
             try:
                 task = _read_task()

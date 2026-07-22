@@ -24,7 +24,7 @@ try:
 except ImportError:
     _HAS_UI = False
 
-SYSTEM_PROMPT = """You are a coding agent working inside a sandboxed project \
+SYSTEM_PROMPT = """You are a coding agent working within a defined project \
 directory. You have tools to read, search, write, and edit files, check git \
 diffs, and run shell commands.
 
@@ -208,7 +208,8 @@ class CodingAgent:
         try:
             if client is not None:
                 return await self._run_loop(task, session_id, messages, persisted, resuming, client)
-            async with MCPToolClient(self.cfg.project_root) as owned_client:
+            async with MCPToolClient(self.cfg.project_root, mcp_config_path=self.cfg.mcp_config_path or None,
+                                      extra_servers=self.cfg.mcp_servers or None) as owned_client:
                 return await self._run_loop(task, session_id, messages, persisted, resuming, owned_client)
         except Exception as e:
             self.store.finish_session(session_id, "error", str(e))
