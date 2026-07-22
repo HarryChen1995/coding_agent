@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.claude/
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Runtime artifacts from running the agent
+agent_run.log
+*.log
+agent_sessions.db
+*.db
+
+# Secrets
+.env
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

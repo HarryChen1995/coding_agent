@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "coding-agent"
+version = "0.1.0"
+description = "Local coding agent driving Qwen Coder (or any Ollama-compatible model) through a sandboxed toolset via MCP"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "httpx>=0.28",
+    "rich>=15.0",
+    "typer>=0.27",
+    "mcp>=1.27",
+]
+
+[project.scripts]
+coding-agent = "coding_agent.cli:app"
+
+[tool.setuptools.packages.find]
+include = ["coding_agent*"]
