@@ -17,7 +17,10 @@ class AgentConfig:
     # Anything not listed here (write_file, edit_file, run_shell by default)
     # will print what it's about to do and wait for confirmation, unless
     # auto_approve=True.
-    safe_tools: tuple = ("read_file", "list_dir", "search_files", "glob_files", "git_diff")
+    safe_tools: tuple = (
+        "read_file", "list_dir", "search_files", "glob_files",
+        "git_diff", "git_status", "git_log", "git_show", "git_branch", "git_fetch",
+    )
 
     auto_approve: bool = False        # True = never prompt (use in CI with care)
     max_steps: int = 25               # hard cap on agent loop iterations

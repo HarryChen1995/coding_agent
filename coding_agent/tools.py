@@ -157,7 +157,140 @@ class Tools:
         except Exception as e:
             return f"ERROR: {e}"
 
+    def git_status(self, path: str = ".") -> str:
+        p = _resolve_in_scope(self.cfg.project_root, path)
+        try:
+            result = subprocess.run(
+                ["git", "status", "--short", "--branch"], cwd=p, capture_output=True, text=True, timeout=15,
+            )
+            return _truncate(result.stdout or "(clean)", self.cfg.max_output_chars)
+        except Exception as e:
+            return f"ERROR: {e}"
+
+    def git_log(self, path: str = ".", max_count: int = 20) -> str:
+        p = _resolve_in_scope(self.cfg.project_root, path)
+        try:
+            result = subprocess.run(
+                ["git", "log", f"-{max_count}", "--pretty=format:%h %ad %an: %s", "--date=short"],
+                cwd=p, capture_output=True, text=True, timeout=15,
+            )
+            if result.returncode != 0:
+                return f"ERROR: {result.stderr.strip()}"
+            return _truncate(result.stdout or "(no commits)", self.cfg.max_output_chars)
+        except Exception as e:
+            return f"ERROR: {e}"
+
+    def git_show(self, ref: str = "HEAD", path: str = ".") -> str:
+        p = _resolve_in_scope(self.cfg.project_root, path)
+        try:
+            result = subprocess.run(
+                ["git", "show", ref], cwd=p, capture_output=True, text=True, timeout=15,
+            )
+            if result.returncode != 0:
+                return f"ERROR: {result.stderr.strip()}"
+            return _truncate(result.stdout, self.cfg.max_output_chars)
+        except Exception as e:
+            return f"ERROR: {e}"
+
+    def git_branch(self, path: str = ".") -> str:
+        p = _resolve_in_scope(self.cfg.project_root, path)
+        try:
+            result = subprocess.run(
+                ["git", "branch", "-vv"], cwd=p, capture_output=True, text=True, timeout=15,
+            )
+            if result.returncode != 0:
+                return f"ERROR: {result.stderr.strip()}"
+            return _truncate(result.stdout or "(no branches)", self.cfg.max_output_chars)
+        except Exception as e:
+            return f"ERROR: {e}"
+
+    def git_fetch(self, remote: str = "origin") -> str:
+        """Update remote-tracking refs without touching the working tree —
+        safe to run without approval, unlike pull/push."""
+        try:
+            result = subprocess.run(
+                ["git", "fetch", remote], cwd=self.cfg.project_root,
+                capture_output=True, text=True, timeout=self.cfg.shell_timeout_s,
+            )
+            out = f"exit_code: {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+            return _truncate(out, self.cfg.max_output_chars)
+        except subprocess.TimeoutExpired:
+            return f"ERROR: git fetch timed out after {self.cfg.shell_timeout_s}s"
+        except Exception as e:
+            return f"ERROR: {e}"
+
     # ---- write tools (require approval unless auto_approve) ----
+
+    def git_add(self, paths: str = ".") -> str:
+        """Stage files for commit. `paths` is a space-separated list of file
+        paths relative to the project root, or "." to stage all changes."""
+        if paths.strip() == ".":
+            args = ["git", "add", "-A"]
+        else:
+            resolved = []
+            for part in paths.split():
+                p = _resolve_in_scope(self.cfg.project_root, part)
+                resolved.append(os.path.relpath(p, self.cfg.project_root))
+            args = ["git", "add"] + resolved
+        try:
+            result = subprocess.run(
+                args, cwd=self.cfg.project_root, capture_output=True, text=True, timeout=15,
+            )
+            if result.returncode != 0:
+                return f"ERROR: {result.stderr.strip()}"
+            return f"Staged: {paths}"
+        except Exception as e:
+            return f"ERROR: {e}"
+
+    def git_commit(self, message: str) -> str:
+        if not message.strip():
+            return "ERROR: commit message cannot be empty"
+        try:
+            result = subprocess.run(
+                ["git", "commit", "-m", message], cwd=self.cfg.project_root,
+                capture_output=True, text=True, timeout=15,
+            )
+            out = f"exit_code: {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+            return _truncate(out, self.cfg.max_output_chars)
+        except Exception as e:
+            return f"ERROR: {e}"
+
+    def git_pull(self, remote: str = "origin", branch: str = "") -> str:
+        """Fetch and merge from a remote into the current branch. Touches
+        the working tree, so this always requires approval (never auto_approve
+        -exempt like the read-only git tools)."""
+        args = ["git", "pull", remote]
+        if branch:
+            args.append(branch)
+        try:
+            result = subprocess.run(
+                args, cwd=self.cfg.project_root, capture_output=True, text=True,
+                timeout=self.cfg.shell_timeout_s,
+            )
+            out = f"exit_code: {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+            return _truncate(out, self.cfg.max_output_chars)
+        except subprocess.TimeoutExpired:
+            return f"ERROR: git pull timed out after {self.cfg.shell_timeout_s}s"
+        except Exception as e:
+            return f"ERROR: {e}"
+
+    def git_push(self, remote: str = "origin", branch: str = "") -> str:
+        """Push commits to a remote. No force-push option is exposed —
+        this tool only ever does a plain push."""
+        args = ["git", "push", remote]
+        if branch:
+            args.append(branch)
+        try:
+            result = subprocess.run(
+                args, cwd=self.cfg.project_root, capture_output=True, text=True,
+                timeout=self.cfg.shell_timeout_s,
+            )
+            out = f"exit_code: {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+            return _truncate(out, self.cfg.max_output_chars)
+        except subprocess.TimeoutExpired:
+            return f"ERROR: git push timed out after {self.cfg.shell_timeout_s}s"
+        except Exception as e:
+            return f"ERROR: {e}"
 
     def write_file(self, path: str, content: str, overwrite: bool = False) -> str:
         p = _resolve_in_scope(self.cfg.project_root, path)

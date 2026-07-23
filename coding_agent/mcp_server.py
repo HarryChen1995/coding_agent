@@ -60,6 +60,61 @@ def git_diff(path: str = ".") -> str:
 
 
 @mcp.tool()
+def git_status(path: str = ".") -> str:
+    """Show the working tree status (short format) and current branch."""
+    return impl.git_status(path)
+
+
+@mcp.tool()
+def git_log(path: str = ".", max_count: int = 20) -> str:
+    """Show recent commit history (hash, date, author, subject)."""
+    return impl.git_log(path, max_count)
+
+
+@mcp.tool()
+def git_show(ref: str = "HEAD", path: str = ".") -> str:
+    """Show a commit's metadata and diff (defaults to HEAD)."""
+    return impl.git_show(ref, path)
+
+
+@mcp.tool()
+def git_branch(path: str = ".") -> str:
+    """List local branches, marking the current one and its upstream tracking info."""
+    return impl.git_branch(path)
+
+
+@mcp.tool()
+def git_fetch(remote: str = "origin") -> str:
+    """Update remote-tracking refs from a remote without touching the working tree."""
+    return impl.git_fetch(remote)
+
+
+@mcp.tool()
+def git_add(paths: str = ".") -> str:
+    """Stage files for commit. `paths` is a space-separated list of file \
+paths relative to the project root, or "." to stage all changes."""
+    return impl.git_add(paths)
+
+
+@mcp.tool()
+def git_commit(message: str) -> str:
+    """Commit staged changes with the given commit message."""
+    return impl.git_commit(message)
+
+
+@mcp.tool()
+def git_pull(remote: str = "origin", branch: str = "") -> str:
+    """Fetch and merge from a remote into the current branch."""
+    return impl.git_pull(remote, branch)
+
+
+@mcp.tool()
+def git_push(remote: str = "origin", branch: str = "") -> str:
+    """Push commits to a remote (defaults to pushing the current branch to origin)."""
+    return impl.git_push(remote, branch)
+
+
+@mcp.tool()
 def write_file(path: str, content: str, overwrite: bool = False) -> str:
     """Create a NEW file with content. Fails if the file already exists
     unless overwrite=true. Use edit_file for existing files."""
