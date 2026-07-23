@@ -41,7 +41,7 @@ async def chat(
     unexpected response shape — callers (agent.py, intent.py) already retry
     on this.
     """
-    url = f"{(base_url or DEFAULT_BASE_URL).rstrip('/')}/api/v1/chat/completions"
+    url = f"{(base_url or DEFAULT_BASE_URL).rstrip('/')}/v1/chat/completions"
     payload = {"model": model, "messages": messages, "stream": False}
     if tools:
         payload["tools"] = tools
