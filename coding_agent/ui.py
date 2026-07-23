@@ -44,7 +44,8 @@ def interactive_banner(model: str, resumed: str = None):
     console.print(f"[dim]model:[/dim] {model}")
     if resumed:
         console.print(f"[dim]resuming session:[/dim] {resumed}")
-    console.print("[dim]Type a task, /sessions to list saved sessions, /exit to quit.[/dim]\n")
+    console.print("[dim]Type a task, /sessions to list saved sessions, /exit to quit. "
+                  "Ctrl+C interrupts the current turn without leaving the session.[/dim]\n")
 
 
 async def prompt_task_async(session) -> str:
@@ -224,6 +225,13 @@ def sessions_table(sessions: list):
                       s["updated_at"], s["model"], task)
 
     console.print(table)
+
+
+def interrupted():
+    console.print(
+        "\n[yellow]⏹ Interrupted — back at the prompt. Progress up to the last "
+        "completed step was saved; keep chatting or ask the agent to continue.[/yellow]"
+    )
 
 
 def warning(text: str):

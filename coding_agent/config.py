@@ -23,7 +23,7 @@ class AgentConfig:
     )
 
     auto_approve: bool = False        # True = never prompt (use in CI with care)
-    max_steps: int = 25               # hard cap on agent loop iterations
+    max_steps: int = 100              # hard cap on agent loop iterations
 
     # Parse the freeform task into structured intent (task_type, target_files,
     # constraints, risk_level) before the agent starts acting.

@@ -32,6 +32,7 @@ Examples:
 
 import asyncio
 import os
+import signal
 from contextlib import nullcontext
 from typing import List, Optional
 
@@ -65,7 +66,7 @@ def main(
              "(defaults to $OLLAMA_API_KEY — prefer the env var over this flag "
              "so the key doesn't end up in your shell history).",
     ),
-    max_steps: int = typer.Option(25, "--max-steps", help="Hard cap on agent loop iterations"),
+    max_steps: int = typer.Option(100, "--max-steps", help="Hard cap on agent loop iterations"),
     auto_approve: bool = typer.Option(
         False, "--auto-approve",
         help="Skip human approval for write/edit/shell tools. Only use in an "
@@ -243,7 +244,8 @@ async def _interactive(cfg: AgentConfig, resume: Optional[str], session_name: Op
         # literal garbage like "?[32m" on the screen.
         stdout_cm = patch_stdout(raw=True)
     except ImportError:
-        typer.echo(f"Interactive mode (model: {cfg.model}). Type a task, /sessions to list, /exit to quit.\n")
+        typer.echo(f"Interactive mode (model: {cfg.model}). Type a task, /sessions to list, /exit to quit. "
+                   "Ctrl+C interrupts the current turn without leaving the session.\n")
         prompt_session = None
         stdout_cm = nullcontext()
 
@@ -278,12 +280,34 @@ async def _interactive(cfg: AgentConfig, resume: Optional[str], session_name: Op
                         typer.echo(f"No session found with id or name {target!r}.", err=True)
                     continue
 
+                # Run the turn as a Task so Ctrl+C can cancel just this turn
+                # (via the SIGINT handler below) instead of killing the whole
+                # REPL — a raw KeyboardInterrupt raised inside asyncio's own
+                # blocking wait can otherwise escape uncaught past this loop
+                # entirely. task.cancel() injects CancelledError at the
+                # coroutine's next await point (model call, tool call, etc.),
+                # unwinding just that turn; the MCP client and session history
+                # already written to disk are untouched, so the REPL keeps going.
+                run_task = asyncio.ensure_future(
+                    agent.run(task, resume_session_id=session_id, client=client,
+                              session_name=session_name, show_banner=False)
+                )
+                previous_sigint = signal.signal(signal.SIGINT, lambda *_: run_task.cancel())
                 try:
-                    result = await agent.run(task, resume_session_id=session_id, client=client,
-                                              session_name=session_name, show_banner=False)
+                    result = await run_task
+                except asyncio.CancelledError:
+                    session_id = agent.session_id or session_id
+                    try:
+                        from . import ui
+                        ui.interrupted()
+                    except ImportError:
+                        typer.echo("\n[Interrupted — back to prompt. You can keep chatting in this session.]")
+                    continue
                 except ValueError as e:
                     typer.echo(f"Error: {e}", err=True)
                     continue
+                finally:
+                    signal.signal(signal.SIGINT, previous_sigint)
 
                 session_id = agent.session_id
 
