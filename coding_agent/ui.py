@@ -7,10 +7,11 @@ isn't installed, agent.py falls back to plain print() (see its import guard).
 import json
 import os
 
+from prompt_toolkit.formatted_text import HTML
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
-from rich.prompt import Confirm, Prompt
+from rich.prompt import Confirm
 from rich.syntax import Syntax
 from rich.rule import Rule
 from rich.table import Table
@@ -46,9 +47,18 @@ def interactive_banner(model: str, resumed: str = None):
     console.print("[dim]Type a task, /sessions to list saved sessions, /exit to quit.[/dim]\n")
 
 
-def prompt_task() -> str:
+async def prompt_task_async(session) -> str:
+    """Read one line of input via a prompt_toolkit PromptSession, so the
+    input line stays pinned to the bottom of the terminal — all other
+    output (parsing/thinking spinners, panels, results) scrolls in the
+    region above it instead of interleaving with the prompt. `session` is
+    a prompt_toolkit.PromptSession the caller creates once and reuses
+    across turns (so up-arrow history works). Must be called inside the
+    caller's `patch_stdout()` context so Rich's output (which resolves
+    sys.stdout lazily on every print) is redrawn above the pinned prompt
+    instead of corrupting it."""
     console.print(Rule(style="dim"))
-    return Prompt.ask("[bold green]❯[/bold green]")
+    return await session.prompt_async(HTML("<ansigreen><b>❯</b></ansigreen> "))
 
 
 def thinking(label: str = "Thinking…"):

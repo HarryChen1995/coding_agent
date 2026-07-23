@@ -32,6 +32,7 @@ Examples:
 
 import asyncio
 import os
+from contextlib import nullcontext
 from typing import List, Optional
 
 import typer
@@ -220,61 +221,78 @@ def main(
 async def _interactive(cfg: AgentConfig, resume: Optional[str], session_name: Optional[str]):
     """REPL: keep one MCP client open across turns (avoids re-spawning the
     tool-server subprocess every turn) and keep resuming the same session
-    (fresh on turn 1, then whatever session that turn created/resumed)."""
+    (fresh on turn 1, then whatever session that turn created/resumed).
+
+    Input is read through a prompt_toolkit PromptSession wrapped in
+    patch_stdout(), so the input line stays pinned to the bottom of the
+    terminal — parsing/thinking spinners, panels, and results all scroll in
+    the region above it instead of interleaving with the prompt. Falls back
+    to a plain input() loop if rich/prompt_toolkit aren't installed."""
     agent = CodingAgent(cfg)
     session_id = resume
 
     try:
         from . import ui
+        from prompt_toolkit import PromptSession
+        from prompt_toolkit.patch_stdout import patch_stdout
         ui.interactive_banner(cfg.model, resumed=resume)
+        prompt_session = PromptSession()
+        # raw=True: pass Rich's ANSI-coded output straight through instead of
+        # patch_stdout()'s default write() path, which sanitizes/escapes text
+        # (it assumes plain text) and mangles embedded escape codes into
+        # literal garbage like "?[32m" on the screen.
+        stdout_cm = patch_stdout(raw=True)
     except ImportError:
         typer.echo(f"Interactive mode (model: {cfg.model}). Type a task, /sessions to list, /exit to quit.\n")
+        prompt_session = None
+        stdout_cm = nullcontext()
 
     if resume:
         _show_resumed_history(cfg.db_path, resume)
 
     async with MCPToolClient(cfg.project_root, mcp_config_path=cfg.mcp_config_path or None,
                               extra_servers=cfg.mcp_servers or None) as client:
-        while True:
-            try:
-                task = _read_task()
-            except (EOFError, KeyboardInterrupt):
-                typer.echo()
-                break
+        with stdout_cm:
+            while True:
+                try:
+                    task = await _read_task(prompt_session)
+                except (EOFError, KeyboardInterrupt):
+                    typer.echo()
+                    break
 
-            task = task.strip()
-            if not task:
-                continue
-            if task in ("/exit", "/quit"):
-                break
-            if task == "/sessions":
-                _print_sessions(agent.store.list_sessions())
-                continue
-            if task.startswith("/delete "):
-                target = task[len("/delete "):].strip()
-                if agent.store.delete_session(target):
-                    typer.echo(f"Deleted session {target!r}.")
-                    if session_id is not None and agent.store.resolve_session_id(session_id) is None:
-                        session_id = None  # the session we were resuming just got deleted
-                else:
-                    typer.echo(f"No session found with id or name {target!r}.", err=True)
-                continue
+                task = task.strip()
+                if not task:
+                    continue
+                if task in ("/exit", "/quit"):
+                    break
+                if task == "/sessions":
+                    _print_sessions(agent.store.list_sessions())
+                    continue
+                if task.startswith("/delete "):
+                    target = task[len("/delete "):].strip()
+                    if agent.store.delete_session(target):
+                        typer.echo(f"Deleted session {target!r}.")
+                        if session_id is not None and agent.store.resolve_session_id(session_id) is None:
+                            session_id = None  # the session we were resuming just got deleted
+                    else:
+                        typer.echo(f"No session found with id or name {target!r}.", err=True)
+                    continue
 
-            try:
-                result = await agent.run(task, resume_session_id=session_id, client=client,
-                                          session_name=session_name, show_banner=False)
-            except ValueError as e:
-                typer.echo(f"Error: {e}", err=True)
-                continue
+                try:
+                    result = await agent.run(task, resume_session_id=session_id, client=client,
+                                              session_name=session_name, show_banner=False)
+                except ValueError as e:
+                    typer.echo(f"Error: {e}", err=True)
+                    continue
 
-            session_id = agent.session_id
+                session_id = agent.session_id
 
-            try:
-                from . import ui
-                ui.final_result(result)
-            except ImportError:
-                typer.echo("\n=== RESULT ===")
-                typer.echo(result)
+                try:
+                    from . import ui
+                    ui.final_result(result)
+                except ImportError:
+                    typer.echo("\n=== RESULT ===")
+                    typer.echo(result)
 
 
 def _show_resumed_history(db_path: str, resume: str):
@@ -298,12 +316,11 @@ def _show_resumed_history(db_path: str, resume: str):
         typer.echo("--- end history ---\n")
 
 
-def _read_task() -> str:
-    try:
+async def _read_task(prompt_session) -> str:
+    if prompt_session is not None:
         from . import ui
-        return ui.prompt_task()
-    except ImportError:
-        return input("> ")
+        return await ui.prompt_task_async(prompt_session)
+    return input("> ")
 
 
 def _print_sessions(sessions: list):
