@@ -90,7 +90,7 @@ class Tools:
         except re.error as e:
             return f"ERROR: invalid regex pattern: {e}"
 
-        max_matches = 500
+        max_matches = 1000
         results = []
         for dirpath, dirnames, filenames in os.walk(p):
             dirnames[:] = [d for d in dirnames if d not in _IGNORE_DIRS]

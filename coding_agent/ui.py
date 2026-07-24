@@ -6,6 +6,7 @@ isn't installed, agent.py falls back to plain print() (see its import guard).
 
 import json
 import os
+import re
 
 from prompt_toolkit.formatted_text import HTML
 from rich.console import Console
@@ -15,8 +16,61 @@ from rich.prompt import Confirm
 from rich.syntax import Syntax
 from rich.rule import Rule
 from rich.table import Table
+from rich.text import Text
 
 console = Console()
+
+_HUNK_RE = re.compile(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@")
+
+
+def _render_diff(diff_text: str) -> Text:
+    """Render a unified diff (as produced by difflib.unified_diff) with a
+    line-number gutter and red/green highlighting for removed/added lines —
+    GitHub-style — instead of relying on pygments' diff-lexer coloring."""
+    body = Text()
+    old_no = new_no = None
+    for line in diff_text.splitlines():
+        if line.startswith("---") or line.startswith("+++"):
+            continue
+        m = _HUNK_RE.match(line)
+        if m:
+            old_no, new_no = int(m.group(1)), int(m.group(2))
+            body.append(f"{line}\n", style="dim cyan")
+            continue
+        if line.startswith("-"):
+            gutter = old_no if old_no is not None else ""
+            body.append(f"{gutter:>5} ", style="dim")
+            body.append(f"{line}\n", style="bold red")
+            if old_no is not None:
+                old_no += 1
+        elif line.startswith("+"):
+            gutter = new_no if new_no is not None else ""
+            body.append(f"{gutter:>5} ", style="dim")
+            body.append(f"{line}\n", style="bold green")
+            if new_no is not None:
+                new_no += 1
+        else:
+            gutter = new_no if new_no is not None else ""
+            body.append(f"{gutter:>5} ", style="dim")
+            body.append(f"{line}\n")
+            if old_no is not None:
+                old_no += 1
+            if new_no is not None:
+                new_no += 1
+    return body
+
+
+def _search_summary(result: str) -> str:
+    """search_files results can be dozens of matched lines — the step log
+    should read as a count, not a code dump (the model still gets the full
+    text; this only affects what's printed to the terminal)."""
+    if result.strip() == "(no matches)":
+        return "0 matches found"
+    lines = [l for l in result.splitlines() if l and not l.startswith("...")]
+    count = len(lines)
+    stopped = "...[stopped at" in result
+    suffix = " (stopped early — narrow your pattern or glob)" if stopped else ""
+    return f"{count} match{'es' if count != 1 else ''} found{suffix}"
 
 _STATUS_COLOR = {"done": "green", "running": "yellow", "max_steps": "yellow", "error": "red"}
 
@@ -147,7 +201,7 @@ async def request_approval(name: str, args: dict, client) -> bool:
         if not ok:
             console.print(Panel(f"[red]{preview}[/red]", title=f"edit_file: {args.get('path')}", border_style="red"))
             return False
-        console.print(Panel(Syntax(preview, "diff", theme="ansi_dark", word_wrap=True),
+        console.print(Panel(_render_diff(preview),
                              title=f"edit_file: {args.get('path')}", border_style="yellow"))
     elif name == "write_file":
         path = args.get("path", "")
@@ -156,7 +210,7 @@ async def request_approval(name: str, args: dict, client) -> bool:
             console.print(Panel(Syntax(preview, _lexer_for(path), theme="ansi_dark", word_wrap=True),
                                  title=f"write_file (new): {path}", border_style="green"))
         else:
-            console.print(Panel(Syntax(preview, "diff", theme="ansi_dark", word_wrap=True),
+            console.print(Panel(_render_diff(preview),
                                  title=f"write_file (overwrite): {path}", border_style="yellow"))
     elif name == "run_shell":
         cmd = args.get("command", "")
@@ -170,12 +224,16 @@ async def request_approval(name: str, args: dict, client) -> bool:
 
 def tool_result(step: int, name: str, result: str, ok: bool):
     icon = "[green]✓[/green]" if ok else "[red]✗[/red]"
-    summary = result.splitlines()[0] if result else ""
+    if ok and name == "search_files":
+        summary = _search_summary(result)
+    else:
+        summary = result.splitlines()[0] if result else ""
     console.print(f"  {icon} {summary[:160]}")
-    # For edits, show the diff body under the summary line if it's short enough.
+    # For edits, show the diff body under the summary line — with a line
+    # number gutter and red/green highlighting for removed/added lines.
     if ok and name == "edit_file" and "\n" in result:
         diff_body = result.split("\n", 1)[1]
-        console.print(Syntax(diff_body, "diff", theme="ansi_dark", word_wrap=True))
+        console.print(_render_diff(diff_body))
 
 
 def final_result(text: str):
