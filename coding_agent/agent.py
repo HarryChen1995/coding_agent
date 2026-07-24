@@ -114,7 +114,10 @@ def _recover_text_tool_calls(content: str, tool_names: set) -> list:
             calls.append({
                 "id": f"fallback_{len(calls)}",
                 "type": "function",
-                "function": {"name": name, "arguments": args},
+                "function": {
+                    "name": name,
+                    "arguments": json.dumps(args, ensure_ascii=False),
+                },
             })
     return calls
 

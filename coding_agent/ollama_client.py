@@ -4,12 +4,47 @@ agent already expects: chat() returns the `message` dict with
 role/content/tool_calls, same as the ollama library did.
 """
 
+import json
 import os
 
 import httpx
 
 DEFAULT_BASE_URL = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 DEFAULT_API_KEY = os.environ.get("OLLAMA_API_KEY", "")  # set via env, never hardcode
+
+
+def _normalize_tool_call(call: dict) -> dict:
+    if not isinstance(call, dict) or call.get("type") != "function":
+        return call
+
+    function = call.get("function")
+    if not isinstance(function, dict):
+        return call
+
+    args = function.get("arguments")
+    if args is None or isinstance(args, str):
+        return call
+
+    normalized = function.copy()
+    normalized["arguments"] = json.dumps(args, ensure_ascii=False)
+    return {**call, "function": normalized}
+
+
+def _normalize_messages(messages: list) -> list:
+    normalized = []
+    for msg in messages:
+        if not isinstance(msg, dict):
+            normalized.append(msg)
+            continue
+        tool_calls = msg.get("tool_calls")
+        if isinstance(tool_calls, list):
+            normalized.append({
+                **msg,
+                "tool_calls": [_normalize_tool_call(call) for call in tool_calls],
+            })
+        else:
+            normalized.append(msg)
+    return normalized
 
 
 class OllamaError(Exception):
@@ -42,7 +77,7 @@ async def chat(
     on this.
     """
     url = f"{(base_url or DEFAULT_BASE_URL).rstrip('/')}/v1/chat/completions"
-    payload = {"model": model, "messages": messages, "stream": False}
+    payload = {"model": model, "messages": _normalize_messages(messages), "stream": False}
     if tools:
         payload["tools"] = tools
     if format == "json":
