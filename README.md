@@ -18,7 +18,8 @@ coding-agent "Add type hints to utils.py, then run the test suite" \
 Equivalent alternative: `python -m coding_agent "..." --project-root ./myrepo`.
 
 Add `--auto-approve` to skip confirmation prompts (only in an already-isolated
-environment, e.g. a container you're fine getting wiped). Run `coding-agent --help`
+environment, e.g. a container you're fine getting wiped). Add `--max-steps N`
+to change the default cap of 100 agent-loop iterations. Run `coding-agent --help`
 for the full option list — it's a Typer app, so `--help` is auto-generated and
 kept in sync with the code.
 
@@ -39,6 +40,9 @@ one-shot run — see [Session management](#session-management) below.
 | Config | Hardcoded constants | `AgentConfig` dataclass — one place to tune model, project root, limits, policy |
 | Sessions | Each run started from a blank conversation | Every message is persisted to SQLite (`session_store.py`); resume by id or name, or run interactively |
 | Codebase search | `grep` piped through a subprocess | Pure-Python `search_files` (regex + glob filter, skips `.git`/`node_modules`/etc.) and a `glob_files` tool for pattern-based file discovery |
+| Git integration | Only `git_diff` (read-only) | Full toolset — `git_status`, `git_log`, `git_show`, `git_branch`, `git_fetch` (read-only, auto-approved) plus `git_add`, `git_commit`, `git_pull`, `git_push` (approval-gated, same as any other write) |
+| Long-term memory | Every session starts blank | `save_memory` tool appends durable notes (conventions, gotchas, preferences) to a project-local `agent_memory.md`, auto-injected into the system prompt at the start of every new session |
+| Interactive robustness | Ctrl+C anywhere killed the whole process | Ctrl+C during a running turn cancels just that turn (via a scoped SIGINT handler + `asyncio.Task.cancel()`) — the session and MCP connection stay alive so you can keep going |
 
 ## Still recommended before real production use
 
@@ -88,6 +92,28 @@ follow from this automatically:
 Skip it with `--skip-intent-parsing` if you want lower latency on simple
 tasks, or point it at a smaller/faster model with `--intent-model`.
 
+## Project memory
+
+The agent can remember durable facts about a project across separate runs —
+conventions, gotchas, stated preferences — via a `save_memory` tool it calls
+on its own (the system prompt tells it when: durable and non-obvious, not
+task-specific status). Notes are appended as timestamped bullets to a
+project-local file, `agent_memory.md` by default (`--project-root`-relative,
+not CWD-relative), e.g.:
+
+```
+- [2026-07-24] This repo uses pytest, not unittest.
+- [2026-07-24] Config is loaded from .env, never hardcode secrets.
+```
+
+Whatever's in that file is read back and folded into the system prompt at the
+start of every new (non-resumed) session — no flag needed, no separate
+"recall" step. `save_memory` is in `safe_tools` by default (auto-approved):
+it only ever appends a line to a bookkeeping file, never touches real source,
+so it doesn't warrant a confirmation prompt like `write_file`/`edit_file` do.
+Resumed sessions keep whatever memory was baked in when they originally
+started rather than re-reading the file live — kept intentionally simple.
+
 ## Session management
 
 Every message in the conversation — system, user, assistant, tool results —
@@ -133,7 +159,12 @@ connection) stays alive between turns, so follow-ups don't pay the cost of
 re-parsing intent or re-spawning the tool server. Special inputs:
 - `/sessions` — list saved sessions without leaving the REPL
 - `/delete <id-or-name>` — delete a saved session without leaving the REPL
-- `/exit` or `/quit` (or Ctrl-D / Ctrl-C) — leave
+- **Ctrl-C while a turn is running** — interrupts just that turn (cancels
+  whatever model or tool call is in flight) and drops you back at the
+  prompt; the session and MCP connection stay alive, so you can keep
+  chatting or ask the agent to pick up where it left off. Progress up to
+  the last completed step is already saved.
+- `/exit` or `/quit` (or Ctrl-D, or Ctrl-C at an idle prompt) — leave
 
 A spinner shows while waiting on the model (initial intent parsing and every
 turn), including a live retry counter if a call fails transiently and gets
@@ -142,11 +173,20 @@ retried — so a slow or cold-loading model doesn't look like it's hung.
 ## Terminal UI
 
 `ui.py` renders everything through [rich](https://github.com/Textualize/rich):
-banner + parsed intent as a panel, each step with a colored ✓/✗, `edit_file`
-diffs and `write_file` new-file content syntax-highlighted by extension,
-approval prompts that show the actual diff/command *before* you approve —
-not just the raw args — and the final response rendered as Markdown (headers,
-lists, code blocks) rather than literal text.
+banner + parsed intent as a panel, each step with a colored ✓/✗, approval
+prompts that show the actual diff/command *before* you approve — not just the
+raw args — and the final response rendered as Markdown (headers, lists, code
+blocks) rather than literal text.
+
+- **`edit_file` diffs** (both the approval preview and the post-edit result)
+  render through a custom GitHub-style diff view — a line-number gutter,
+  removed lines in bold red, added lines in bold green — instead of generic
+  pygments diff coloring. `write_file`'s overwrite preview uses the same
+  renderer; new-file content is syntax-highlighted by extension instead.
+- **`search_files` and `read_file` step output is summarized, not dumped** —
+  you see `"3 matches found"` or `"42 lines (1180 chars)"` rather than the
+  actual matched lines or file content scrolling past. The model still gets
+  the full text either way; this only changes what's echoed to the terminal.
 
 If `rich` isn't installed, `agent.py` and `cli.py` both detect the missing
 import and fall back to plain `print()` — nothing breaks, it just looks
@@ -292,7 +332,7 @@ global registry.
 All modules live under `coding_agent/`:
 - `config.py` — all tunables in one dataclass
 - `intent.py` — parses the freeform task into structured intent (task_type, target_files, constraints, risk_level)
-- `tools.py` — tool implementations, each scoped to `project_root` (used by `mcp_server.py`, not called directly by the agent anymore)
+- `tools.py` — tool implementations, each scoped to `project_root` (used by `mcp_server.py`, not called directly by the agent anymore) — read/write/edit/search/shell, a full git toolset, and `save_memory`
 - `mcp_server.py` — MCP server exposing those tools over stdio
 - `mcp_client.py` — async MCP client the agent uses to reach the server
 - `ollama_client.py` — raw `httpx` client for the model's OpenAI-compatible chat-completions endpoint — no `ollama` package dependency

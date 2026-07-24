@@ -38,16 +38,24 @@ Run `coding-agent --help` for the full option list.
   (`--resume`), browse saved sessions (`--list-sessions`), or delete one
   (`--delete-session`).
 - **Interactive mode** — drop into a REPL that keeps the model connection
-  and tool session alive across turns.
+  and tool session alive across turns. Ctrl-C during a running turn cancels
+  just that turn instead of killing the session — you land back at the
+  prompt and can keep going.
 - **Human-in-the-loop approval** — every write, edit, or shell command
-  shows a diff or command preview before you confirm, unless explicitly
-  marked safe or run with `--auto-approve`.
+  shows a diff or command preview before you confirm (diffs render with
+  line numbers and red/green highlighting), unless explicitly marked safe
+  or run with `--auto-approve`.
 - **Retry and recovery** — transient model failures retry with backoff;
   malformed tool-call output is caught and reported back to the model
   instead of crashing the run.
 - **Codebase exploration tools** — regex content search with glob
-  filtering, pattern-based file discovery, directory listing, and git diff,
-  all skipping noise directories (`.git`, `node_modules`, build output).
+  filtering, pattern-based file discovery, directory listing, and a full
+  git toolset (status/log/diff/show/branch/fetch read-only; add/commit/
+  pull/push approval-gated), all skipping noise directories (`.git`,
+  `node_modules`, build output).
+- **Persistent project memory** — the agent can save durable notes (a
+  `save_memory` tool call) to a per-project `agent_memory.md`, auto-loaded
+  into the system prompt at the start of every new session.
 - **Extensible via custom MCP servers** — point at any MCP server, local
   (stdio) or remote (SSE / Streamable HTTP), and its tools merge into the
   model's toolset automatically, no code changes required. Register one

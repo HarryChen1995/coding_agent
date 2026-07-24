@@ -90,6 +90,15 @@ def git_fetch(remote: str = "origin") -> str:
 
 
 @mcp.tool()
+def save_memory(note: str) -> str:
+    """Persist a short, durable note to this project's memory file — a \
+convention, gotcha, or preference worth remembering — so it's automatically \
+recalled at the start of every future session. Don't use it for task-specific \
+status or anything derivable from the code itself."""
+    return impl.save_memory(note)
+
+
+@mcp.tool()
 def git_add(paths: str = ".") -> str:
     """Stage files for commit. `paths` is a space-separated list of file \
 paths relative to the project root, or "." to stage all changes."""

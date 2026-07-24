@@ -8,6 +8,7 @@ session is async under the hood).
 import asyncio
 import json
 import logging
+import os
 import re
 from contextlib import nullcontext
 
@@ -34,9 +35,23 @@ refuse to overwrite unless you pass overwrite=true.
 - Before running anything destructive or irreversible, check git_diff or \
 read_file first so you understand current state.
 - Keep changes minimal and focused on the task.
+- When you learn a durable fact about this project (a convention, gotcha, \
+build quirk, or stated preference) that would help in a future session, \
+call save_memory to persist it. Keep notes short and skip anything already \
+obvious from the code itself.
 - When the task is fully done, reply with plain text (no tool call) \
 summarizing what changed and how to verify it (e.g. which command to run).
 """
+
+
+def _load_project_memory(project_root: str, memory_path: str) -> str:
+    """Read back whatever save_memory has accumulated for this project, so
+    it can be folded into the system prompt at the start of a new session."""
+    path = os.path.join(project_root, memory_path)
+    if not os.path.isfile(path):
+        return ""
+    with open(path, "r", encoding="utf-8") as f:
+        return f.read().strip()
 
 
 def _setup_logger(log_path: str) -> logging.Logger:
@@ -199,8 +214,12 @@ class CodingAgent:
             if _HAS_UI and show_banner:
                 ui.banner(task, self.cfg.model)
             session_id = self.store.create_session(self.cfg.project_root, self.cfg.model, task, name=session_name)
+            system_content = SYSTEM_PROMPT
+            memory_text = _load_project_memory(self.cfg.project_root, self.cfg.memory_path)
+            if memory_text:
+                system_content += "\n\n# Project memory (persisted from previous sessions)\n" + memory_text
             messages = [
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": system_content},
                 {"role": "user", "content": task},
             ]
             persisted = 0

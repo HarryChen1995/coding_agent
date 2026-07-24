@@ -20,10 +20,17 @@ class AgentConfig:
     safe_tools: tuple = (
         "read_file", "list_dir", "search_files", "glob_files",
         "git_diff", "git_status", "git_log", "git_show", "git_branch", "git_fetch",
+        "save_memory",
     )
 
     auto_approve: bool = False        # True = never prompt (use in CI with care)
     max_steps: int = 100              # hard cap on agent loop iterations
+
+    # Project-local file of durable notes (conventions, gotchas, preferences)
+    # the agent has chosen to remember via the save_memory tool. Resolved
+    # relative to project_root, not CWD. Read back in and folded into the
+    # system prompt at the start of every new (non-resumed) session.
+    memory_path: str = "agent_memory.md"
 
     # Parse the freeform task into structured intent (task_type, target_files,
     # constraints, risk_level) before the agent starts acting.
