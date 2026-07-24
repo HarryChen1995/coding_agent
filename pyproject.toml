@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ollama-coding-agent"
+version = "0.5.7"
+description = "AI coding agent driving Qwen Coder (or any Ollama-compatible model) through a scoped toolset via MCP"
+readme = "PYPI_README.md"
+requires-python = ">=3.10"
+license = "MIT"
+classifiers = [
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Build Tools",
+]
+dependencies = [
+    "httpx>=0.28",
+    "rich>=15.0",
+    "typer>=0.27",
+    "mcp>=1.27",
+    "prompt_toolkit>=3.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/HarryChen1995/coding_agent"
+Repository = "https://github.com/HarryChen1995/coding_agent"
+Issues = "https://github.com/HarryChen1995/coding_agent/issues"
+
+[project.scripts]
+coding-agent = "coding_agent.cli:app"
+
+[tool.setuptools.packages.find]
+include = ["coding_agent*"]
