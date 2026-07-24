@@ -72,6 +72,14 @@ def _search_summary(result: str) -> str:
     suffix = " (stopped early — narrow your pattern or glob)" if stopped else ""
     return f"{count} match{'es' if count != 1 else ''} found{suffix}"
 
+
+def _read_summary(result: str) -> str:
+    """read_file's result is the raw file content — the step log should
+    say how much was read, not echo the code (the model still gets the
+    full text; this only affects what's printed to the terminal)."""
+    lines = result.splitlines()
+    return f"{len(lines)} line{'s' if len(lines) != 1 else ''} ({len(result)} chars)"
+
 _STATUS_COLOR = {"done": "green", "running": "yellow", "max_steps": "yellow", "error": "red"}
 
 _LEXER_BY_EXT = {
@@ -226,6 +234,8 @@ def tool_result(step: int, name: str, result: str, ok: bool):
     icon = "[green]✓[/green]" if ok else "[red]✗[/red]"
     if ok and name == "search_files":
         summary = _search_summary(result)
+    elif ok and name == "read_file":
+        summary = _read_summary(result)
     else:
         summary = result.splitlines()[0] if result else ""
     console.print(f"  {icon} {summary[:160]}")
