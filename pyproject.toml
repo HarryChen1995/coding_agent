@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ollama-coding-agent"
+name = "omni-coder"
 version = "0.5.9"
 description = "A scoped, MCP-powered coding agent that puts Qwen Coder (or any OpenAI-compatible model) to work in your codebase"
 readme = "PYPI_README.md"
@@ -31,12 +31,12 @@ dependencies = [
 local-embeddings = ["nomic[local]"]
 
 [project.urls]
-Homepage = "https://github.com/HarryChen1995/coding_agent"
-Repository = "https://github.com/HarryChen1995/coding_agent"
-Issues = "https://github.com/HarryChen1995/coding_agent/issues"
+Homepage = "https://github.com/HarryChen1995/omni-coder"
+Repository = "https://github.com/HarryChen1995/omni-coder"
+Issues = "https://github.com/HarryChen1995/omni-coder/issues"
 
 [project.scripts]
-coding-agent = "coding_agent.cli:app"
+coding-agent = "omni.cli:app"
 
 [tool.setuptools.packages.find]
-include = ["coding_agent*"]
+include = ["omni*"]

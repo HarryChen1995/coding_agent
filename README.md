@@ -15,7 +15,7 @@ Open WebUI) — point `--llm-host` at whichever one you're running.
 coding-agent "Add type hints to utils.py, then run the test suite" \
     --project-root ./myrepo
 ```
-Equivalent alternative: `python -m coding_agent "..." --project-root ./myrepo`.
+Equivalent alternative: `python -m omni "..." --project-root ./myrepo`.
 
 Add `--auto-approve` to skip confirmation prompts (only in an already-isolated
 environment, e.g. a container you're fine getting wiped). Add `--max-steps N`
@@ -196,7 +196,7 @@ like the original CLI.
 
 The tools live behind a real MCP server (`mcp_server.py`), not inline in the
 agent. The agent is an MCP *client* — it spawns the server as a subprocess
-(stdio transport, launched as `python -m coding_agent.mcp_server` so its
+(stdio transport, launched as `python -m omni.mcp_server` so its
 relative imports resolve) scoped to `--project-root`, fetches the tool list,
 converts it to OpenAI's function-calling schema, and calls tools through the
 MCP session instead of Python function calls directly.
@@ -269,7 +269,7 @@ What this buys you:
   path-scope, denylist, and diff-preview logic in `tools.py`.
 - **The server is independently runnable and testable**:
   ```bash
-  AGENT_PROJECT_ROOT=/path/to/repo python -m coding_agent.mcp_server
+  AGENT_PROJECT_ROOT=/path/to/repo python -m omni.mcp_server
   ```
 - Internal tools (`_preview_edit`, `_preview_write`, `_file_exists`) are
   underscore-prefixed and filtered out of what's shown to the LLM in
@@ -398,7 +398,7 @@ coding-agent --embedding-model mxbai-embed-large "task"  # use a remote OpenAI-c
   server or API key involved. It's declared as this project's own
   `local-embeddings` extra (`pyproject.toml`), so install it with:
   ```bash
-  pip install "ollama-coding-agent[local-embeddings]"   # from PyPI
+  pip install "omni-coder[local-embeddings]"   # from PyPI
   pip install -e ".[local-embeddings]"                  # from a local checkout
   ```
   (optional, not a hard dependency — pulls in `nomic[local]`, and the model
@@ -415,7 +415,7 @@ coding-agent --embedding-model mxbai-embed-large "task"  # use a remote OpenAI-c
   out — `search_tools` still answers, just less precisely.
 
 ## Files
-All modules live under `coding_agent/`:
+All modules live under `omni/`:
 - `config.py` — all tunables in one dataclass
 - `intent.py` — parses the freeform task into structured intent (task_type, target_files, constraints, risk_level)
 - `tools.py` — tool implementations, each scoped to `project_root` (used by `mcp_server.py`, not called directly by the agent anymore) — read/write/edit/search/shell, a full git toolset, and `save_memory`
@@ -426,7 +426,7 @@ All modules live under `coding_agent/`:
 - `ui.py` — rich terminal rendering (diffs, panels, approval prompts, session tables) — purely presentational
 - `agent.py` — the loop: parse intent, call model, approve, execute via MCP, persist, repeat
 - `cli.py` — command-line entry point (Typer — `coding-agent --help` for auto-generated, always-in-sync docs)
-- `__main__.py` — enables `python -m coding_agent`
+- `__main__.py` — enables `python -m omni`
 
 Point at a non-default host with `--llm-host http://some-host:11434`
 or the `LLM_HOST` env var (checked in that order).

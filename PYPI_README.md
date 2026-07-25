@@ -7,7 +7,7 @@ tools, with human approval on every write, edit, or shell command.
 ## Install
 
 ```bash
-pip install ollama-coding-agent
+pip install omni-coder
 ollama pull qwen3-coder:30b
 ```
 
@@ -18,7 +18,7 @@ coding-agent "Add type hints to utils.py, then run the test suite" \
     --project-root ./myrepo
 ```
 
-Equivalent: `python -m coding_agent "..." --project-root ./myrepo`.
+Equivalent: `python -m omni "..." --project-root ./myrepo`.
 
 Omit the task string to enter an interactive session instead:
 
@@ -129,7 +129,7 @@ need to be `-m`-invokable, a standalone script's absolute path works too
 Append `,defer` (or pass `--defer` with `--add-mcp-server`) to keep a
 server's tools out of the model's default tool list — it discovers them on
 demand via `search_tools`, ranked semantically by default
-(`pip install "ollama-coding-agent[local-embeddings]"` for on-device
+(`pip install "omni-coder[local-embeddings]"` for on-device
 embeddings, or point `--embedding-model` at a remote one instead;
 `--embedding-model ""` falls back to plain keyword matching). See the full
 README for details.
@@ -144,7 +144,7 @@ key doesn't end up in shell history.
 ## Links
 
 Source, full documentation, and issue tracker:
-https://github.com/HarryChen1995/coding_agent
+https://github.com/HarryChen1995/omni-coder
 
 ## License
 
