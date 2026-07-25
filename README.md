@@ -301,7 +301,7 @@ omni --add-mcp-server "weather=python -m weather_mcp_server"     # local, stdio
 omni --add-mcp-server "weather=https://example.com/mcp/sse"      # remote, SSE
 omni "what's the forecast?"   # picked up automatically
 ```
-Saved to `~/.coding_agent/mcp.json` and auto-loaded whenever `--mcp-config`
+Saved to `~/.omni-coder/mcp.json` and auto-loaded whenever `--mcp-config`
 isn't explicitly passed. Manage the registry with:
 ```bash
 omni --list-mcp-servers

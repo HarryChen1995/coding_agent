@@ -122,7 +122,7 @@ def main(
     add_mcp_server: Optional[str] = typer.Option(
         None, "--add-mcp-server",
         help='Register a custom MCP server permanently (format "name=command arg1 arg2 ..."), '
-             "then exit. Saved to ~/.coding_agent/mcp.json and auto-loaded on every future run "
+             "then exit. Saved to ~/.omni-coder/mcp.json and auto-loaded on every future run "
              "— no need to pass --mcp-server/--mcp-config again.",
     ),
     defer: bool = typer.Option(
@@ -200,7 +200,7 @@ def main(
         raise typer.Exit(code=1)
 
     # Explicit --mcp-config wins; otherwise auto-load the global registry
-    # (~/.coding_agent/mcp.json) if it exists, so servers added once via
+    # (~/.omni-coder/mcp.json) if it exists, so servers added once via
     # --add-mcp-server are available on every run without any flags.
     effective_mcp_config_path = mcp_config or (
         default_mcp_config_path() if os.path.exists(default_mcp_config_path()) else ""

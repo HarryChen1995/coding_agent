@@ -42,10 +42,10 @@ class EmbeddingUnavailable(Exception):
 
 
 def default_mcp_config_path() -> str:
-    """Global, cross-session MCP server registry — ~/.coding_agent/mcp.json.
+    """Global, cross-session MCP server registry — ~/.omni-coder/mcp.json.
     Servers registered here (via `--add-mcp-server`) are available on every
     future run automatically, without passing --mcp-config/--mcp-server."""
-    return os.path.join(os.path.expanduser("~"), ".coding_agent", "mcp.json")
+    return os.path.join(os.path.expanduser("~"), ".omni-coder", "mcp.json")
 
 
 def save_mcp_config(path: str, servers: dict) -> None:
