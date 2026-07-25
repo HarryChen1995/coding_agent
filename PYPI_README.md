@@ -61,6 +61,11 @@ Run `coding-agent --help` for the full option list.
   model's toolset automatically, no code changes required. Register one
   permanently (`--add-mcp-server`, available on every future run) or add
   one per run (`--mcp-server`/`--mcp-config`).
+- **Deferred tool loading + semantic search_tools** — register a custom MCP
+  server with `--defer` and its tools stay out of the model's context until
+  a synthesized `search_tools` tool loads matching ones on demand, ranked by
+  on-device embeddings (`nomic-local`, default) or an Ollama-hosted
+  embedding model, with automatic keyword-match fallback.
 
 ## Architecture
 
@@ -84,7 +89,10 @@ stdio:
 +-----------------------------+
 |          MCP client         |
 |  built-in + custom servers  |
-|  merged into one tool list  |
+|  merged into one tool list. |
+| "defer"-registered servers  |
+| hold tools back for on-     |
+| demand search_tools lookup  |
 +-----------------------------+
                |
  stdio / SSE / streamable-http
@@ -117,6 +125,13 @@ remote server (SSE by default, append `,streamable_http` for that transport
 instead); anything else is a local command spawned over stdio — it doesn't
 need to be `-m`-invokable, a standalone script's absolute path works too
 (e.g. `"myserver=python C:/absolute/path/to/mcp_server.py"`).
+
+Append `,defer` (or pass `--defer` with `--add-mcp-server`) to keep a
+server's tools out of the model's default tool list — it discovers them on
+demand via `search_tools`, ranked semantically by default
+(`pip install "nomic[local]"` for on-device embeddings, or point
+`--embedding-model` at an Ollama-hosted one; `--embedding-model ""` falls
+back to plain keyword matching). See the full README for details.
 
 ## Configuration
 

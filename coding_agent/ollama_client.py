@@ -106,3 +106,45 @@ async def chat(
     if message is None:
         raise OllamaError(f"Unexpected response shape from Ollama (no 'message' key): {data}")
     return message
+
+
+async def embed(
+    model: str,
+    input: list,
+    base_url: str = None,
+    api_key: str = None,
+    timeout: float = 30.0,
+) -> list:
+    """POST /v1/embeddings (OpenAI-compatible) and return one vector per
+    string in `input`, same order. Used for semantic search_tools ranking
+    (mcp_client.py) — a plain vector lookup, so it's much cheaper than a
+    chat() round-trip.
+
+    Raises OllamaError on a non-2xx response, a connection failure, or an
+    unexpected response shape — same as chat()."""
+    url = f"{(base_url or DEFAULT_BASE_URL).rstrip('/')}/v1/embeddings"
+    payload = {"model": model, "input": input}
+
+    key = api_key or DEFAULT_API_KEY
+    headers = {"Authorization": f"Bearer {key}"} if key else {}
+
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.post(url, json=payload, headers=headers)
+            resp.raise_for_status()
+            data = resp.json()
+    except httpx.HTTPStatusError as e:
+        body = e.response.text[:300]
+        raise OllamaError(f"Ollama API returned {e.response.status_code} for embedding model {model}: {body}") from e
+    except httpx.RequestError as e:
+        raise OllamaError(
+            f"Could not reach Ollama at {url} ({e}). Is `ollama serve` running?"
+        ) from e
+
+    items = data.get("data")
+    if not items:
+        raise OllamaError(f"Unexpected response shape from Ollama embeddings (no 'data' key): {data}")
+    try:
+        return [item["embedding"] for item in items]
+    except (KeyError, TypeError) as e:
+        raise OllamaError(f"Unexpected response shape from Ollama embeddings (no 'embedding' key): {data}") from e

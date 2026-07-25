@@ -23,6 +23,12 @@ dependencies = [
     "prompt_toolkit>=3.0",
 ]
 
+[project.optional-dependencies]
+# On-device embeddings for search_tools semantic ranking of deferred MCP
+# tools (the default embedding_model="nomic-local"). Without this installed,
+# search_tools falls back to plain keyword matching automatically.
+local-embeddings = ["nomic[local]"]
+
 [project.urls]
 Homepage = "https://github.com/HarryChen1995/coding_agent"
 Repository = "https://github.com/HarryChen1995/coding_agent"

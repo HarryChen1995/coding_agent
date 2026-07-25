@@ -223,7 +223,10 @@ MCP session instead of Python function calls directly.
 +------------------------------------------+
 |              mcp_client.py               |
 |     built-in + custom servers merged     |
-|      into one namespaced tool list       |
+|      into one namespaced tool list.      |
+|  Servers marked "defer" hold their tools |
+| back; a synthesized search_tools tool    |
+|   reveals matches on demand (below)      |
 +------------------------------------------+
                      |
        stdio / SSE / streamable-http
@@ -238,6 +241,26 @@ MCP session instead of Python function calls directly.
 |  read / write / edit / search / shell,   |
 |       each scoped to project_root        |
 +------------------------------------------+
+```
+
+Resolving a `search_tools` call (inside `mcp_client.py`, see
+[Deferred tool loading & search_tools](#deferred-tool-loading--search_tools)):
+
+```
+search_tools(query) for a "defer"-registered server's hidden tools
+                     |
+                     v
+              embedding_model?
+   |
+   |-- "nomic-local" (default) --> nomic package, on-device,
+   |                                no server (pip install "nomic[local]")
+   |-- <ollama-model-name>     --> ollama_client.embed() -> your Ollama server
+   |-- ""                      --> skip straight to keyword match
+   |
+   v
+cosine-rank matches, above threshold -> reveal
+(embedding backend missing/erroring at any point falls back to
+ plain keyword substring matching automatically, per call)
 ```
 
 What this buys you:
@@ -328,14 +351,74 @@ global registry.
   support auth headers — use `--mcp-config` with a JSON file when the
   remote server needs them.
 
+## Deferred tool loading & search_tools
+
+A custom MCP server with a lot of tools (or ones rarely needed) can be
+registered with `"defer": true` instead of loading eagerly. Its tools are
+held back from the model's default tool list entirely — instead the model
+gets one extra tool, `search_tools`, which it calls with a keyword or
+free-text query to load matching tools on demand. This keeps unused tool
+schemas out of context on every turn, the same trade-off this harness's own
+tool search makes for its own rarely-used tools.
+
+Mark a server as deferred the same three ways you'd register one:
+```bash
+# permanently, via the global registry
+coding-agent --add-mcp-server "docs=node docs-server.js" --defer
+
+# for a single run, via the compact spec (",defer" suffix works for
+# stdio and remote/URL specs alike)
+coding-agent --mcp-server "docs=node docs-server.js,defer" "task"
+coding-agent --mcp-server "docs=https://example.com/mcp,streamable_http,defer" "task"
+```
+or in a `--mcp-config` JSON file, add `"defer": true` to that server's entry:
+```json
+{
+  "mcpServers": {
+    "docs": { "command": "node", "args": ["docs-server.js"], "defer": true }
+  }
+}
+```
+`--list-mcp-servers` marks deferred entries with `[defer]`.
+
+Once a query reveals a tool, it stays available for the rest of that run —
+`search_tools` never needs to be called twice for the same tool. That
+revealed state lives only in memory for the current run, though: resuming a
+session later (`--resume`) starts every deferred server's tools hidden
+again. An empty query reveals everything still hidden at once.
+
+**Matching is semantic by default**, ranked by cosine similarity between the
+query and each hidden tool's name + description, so a query doesn't need to
+share literal keywords with the tool it's after:
+```bash
+coding-agent --embedding-model "" "task"                 # disable, plain keyword match only
+coding-agent --embedding-model mxbai-embed-large "task"  # use an Ollama-hosted embedding model instead
+```
+- **Default (`nomic-local`)** — runs on-device via the `nomic` package, no
+  server or API key involved. Install it with:
+  ```bash
+  pip install "nomic[local]"
+  ```
+  (an optional extra, not a hard dependency — the model itself downloads on
+  first use). Without it installed, `search_tools` automatically falls back
+  to plain keyword matching and says so in its result.
+- **An Ollama model name** (e.g. `mxbai-embed-large`) instead embeds via the
+  same `--ollama-host`/`--ollama-api-key` this agent already talks to for
+  chat — pull it there first (`ollama pull mxbai-embed-large`).
+- **`""`** disables semantic ranking outright; `search_tools` then requires
+  every word in the query to literally appear in a tool's name/description.
+- Any embedding failure (dependency missing, model not pulled, network
+  error) falls back to keyword matching for that call rather than erroring
+  out — `search_tools` still answers, just less precisely.
+
 ## Files
 All modules live under `coding_agent/`:
 - `config.py` — all tunables in one dataclass
 - `intent.py` — parses the freeform task into structured intent (task_type, target_files, constraints, risk_level)
 - `tools.py` — tool implementations, each scoped to `project_root` (used by `mcp_server.py`, not called directly by the agent anymore) — read/write/edit/search/shell, a full git toolset, and `save_memory`
 - `mcp_server.py` — MCP server exposing those tools over stdio
-- `mcp_client.py` — async MCP client the agent uses to reach the server
-- `ollama_client.py` — raw `httpx` client for the model's OpenAI-compatible chat-completions endpoint — no `ollama` package dependency
+- `mcp_client.py` — async MCP client the agent uses to reach the server; also merges in any custom MCP servers, and implements deferred tool loading + the `search_tools` tool (semantic ranking via `nomic[local]` or an Ollama embedding model, falling back to keyword matching)
+- `ollama_client.py` — raw `httpx` client for the model's OpenAI-compatible chat-completions endpoint (`chat()`) and embeddings endpoint (`embed()`, used by `mcp_client.py`'s `search_tools`) — no `ollama` package dependency
 - `session_store.py` — SQLite persistence for sessions and their full message history (resume/list/interactive mode)
 - `ui.py` — rich terminal rendering (diffs, panels, approval prompts, session tables) — purely presentational
 - `agent.py` — the loop: parse intent, call model, approve, execute via MCP, persist, repeat

@@ -20,7 +20,7 @@ class AgentConfig:
     safe_tools: tuple = (
         "read_file", "list_dir", "search_files", "glob_files",
         "git_diff", "git_status", "git_log", "git_show", "git_branch", "git_fetch",
-        "save_memory",
+        "save_memory", "search_tools",
     )
 
     auto_approve: bool = False        # True = never prompt (use in CI with care)
@@ -52,6 +52,19 @@ class AgentConfig:
     # CLI flags), as {name: {"command": ..., "args": [...], "env": {...}}}.
     # Merged with mcp_config_path's servers; wins on a name clash.
     mcp_servers: dict = field(default_factory=dict)
+
+    # Embedding backend for ranking search_tools queries against deferred
+    # MCP tool descriptions:
+    #   "nomic-local" (default) - on-device via the `nomic` package, no
+    #       server involved (needs `pip install "nomic[local]"`; the model
+    #       itself downloads on first use)
+    #   any other string - an Ollama-hosted embedding model name (e.g.
+    #       "mxbai-embed-large"), fetched from ollama_host/ollama_api_key
+    #   "" - disabled; search_tools falls back to plain keyword matching
+    # Falls back to keyword matching automatically, per call, if the
+    # configured backend errors (missing dependency, model not pulled,
+    # network error).
+    embedding_model: str = "nomic-local"
 
     # Commands the agent is never allowed to run, regardless of approval.
     denied_shell_patterns: tuple = field(default_factory=lambda: (

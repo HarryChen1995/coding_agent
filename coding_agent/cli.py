@@ -24,6 +24,9 @@ Examples:
     python cli.py --add-mcp-server "weather=python -m weather_mcp_server"  # register once,
     python cli.py "what's the forecast?"                                   # available from here on, no flags needed
 
+    python cli.py --add-mcp-server "docs=node docs-server.js" --defer  # tools loaded on demand
+    python cli.py --mcp-server "docs=node docs-server.js,defer" "..."  # same, one-off via suffix
+
     python cli.py --list-mcp-servers
     python cli.py --remove-mcp-server weather
 
@@ -80,6 +83,13 @@ def main(
     intent_model: Optional[str] = typer.Option(
         None, "--intent-model", help="Smaller/faster model to use just for intent parsing (defaults to --model)",
     ),
+    embedding_model: Optional[str] = typer.Option(
+        None, "--embedding-model",
+        help="Embedding backend for search_tools semantic ranking against deferred MCP tool "
+             'descriptions. Defaults to "nomic-local" — on-device via `pip install "nomic[local]"`, '
+             "no server needed. Pass an Ollama-hosted embedding model name (e.g. mxbai-embed-large) "
+             'to use that instead, or "" to disable and fall back to plain keyword matching.',
+    ),
     db_path: str = typer.Option(
         "agent_sessions.db", "--db-path", help="SQLite file storing session/message history",
     ),
@@ -105,13 +115,22 @@ def main(
         [], "--mcp-server",
         help='Add one custom MCP server inline, format "name=command arg1 arg2 ...". '
              "Repeatable for multiple servers. Merged with --mcp-config if both are given "
-             "(this flag wins on a name clash). Its tools appear to the model as <name>__<tool>.",
+             "(this flag wins on a name clash). Its tools appear to the model as <name>__<tool>. "
+             'Append ",defer" (e.g. "name=command args...,defer") to keep this server\'s tools '
+             "out of the model's default tool list — it discovers them on demand via search_tools.",
     ),
     add_mcp_server: Optional[str] = typer.Option(
         None, "--add-mcp-server",
         help='Register a custom MCP server permanently (format "name=command arg1 arg2 ..."), '
              "then exit. Saved to ~/.coding_agent/mcp.json and auto-loaded on every future run "
              "— no need to pass --mcp-server/--mcp-config again.",
+    ),
+    defer: bool = typer.Option(
+        False, "--defer",
+        help="With --add-mcp-server: don't expose this server's tools to the model up front. "
+             "Instead a search_tools tool is offered; the model calls it with a query to load "
+             "matching tools on demand, keeping unused tool schemas out of context. Default: false "
+             '(equivalent to appending ",defer" to the --add-mcp-server / --mcp-server spec).',
     ),
     remove_mcp_server: Optional[str] = typer.Option(
         None, "--remove-mcp-server", help="Remove a permanently-registered MCP server by name, then exit",
@@ -128,12 +147,15 @@ def main(
         except ValueError as e:
             typer.echo(f"Error: {e}", err=True)
             raise typer.Exit(code=1)
+        (name,) = spec.keys()
+        if defer:
+            spec[name]["defer"] = True
         path = default_mcp_config_path()
         servers = load_mcp_config(path) if os.path.exists(path) else {}
         servers.update(spec)
         save_mcp_config(path, servers)
-        (name,) = spec.keys()
-        typer.echo(f"Registered MCP server {name!r} in {path} — available on every run from now on.")
+        suffix = " (deferred tool loading)" if spec[name].get("defer") else ""
+        typer.echo(f"Registered MCP server {name!r} in {path}{suffix} — available on every run from now on.")
         raise typer.Exit()
 
     if remove_mcp_server:
@@ -154,7 +176,9 @@ def main(
             typer.echo("No registered MCP servers.")
         else:
             for name, spec in servers.items():
-                typer.echo(f"{name}: {spec['command']} {' '.join(spec.get('args', []))}")
+                target = spec["url"] if "url" in spec else f"{spec['command']} {' '.join(spec.get('args', []))}"
+                suffix = " [defer]" if spec.get("defer") else ""
+                typer.echo(f"{name}: {target}{suffix}")
         raise typer.Exit()
 
     if delete_session:
@@ -195,6 +219,9 @@ def main(
         db_path=db_path,
         mcp_config_path=effective_mcp_config_path,
         mcp_servers=extra_mcp_servers,
+        # None (flag omitted) -> AgentConfig's own default ("nomic-embed-text");
+        # "" (--embedding-model "" explicitly) -> disabled.
+        embedding_model=embedding_model if embedding_model is not None else AgentConfig.embedding_model,
     )
 
     if task is None:
@@ -253,7 +280,10 @@ async def _interactive(cfg: AgentConfig, resume: Optional[str], session_name: Op
         _show_resumed_history(cfg.db_path, resume)
 
     async with MCPToolClient(cfg.project_root, mcp_config_path=cfg.mcp_config_path or None,
-                              extra_servers=cfg.mcp_servers or None) as client:
+                              extra_servers=cfg.mcp_servers or None,
+                              embedding_model=cfg.embedding_model or None,
+                              ollama_host=cfg.ollama_host or None,
+                              ollama_api_key=cfg.ollama_api_key or None) as client:
         with stdout_cm:
             while True:
                 try:

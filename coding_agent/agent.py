@@ -231,7 +231,10 @@ class CodingAgent:
             if client is not None:
                 return await self._run_loop(task, session_id, messages, persisted, resuming, client)
             async with MCPToolClient(self.cfg.project_root, mcp_config_path=self.cfg.mcp_config_path or None,
-                                      extra_servers=self.cfg.mcp_servers or None) as owned_client:
+                                      extra_servers=self.cfg.mcp_servers or None,
+                                      embedding_model=self.cfg.embedding_model or None,
+                                      ollama_host=self.cfg.ollama_host or None,
+                                      ollama_api_key=self.cfg.ollama_api_key or None) as owned_client:
                 return await self._run_loop(task, session_id, messages, persisted, resuming, owned_client)
         except Exception as e:
             self.store.finish_session(session_id, "error", str(e))
@@ -320,6 +323,11 @@ class CodingAgent:
                 else:
                     try:
                         result = await client.call_tool(name, args)
+                        if name == "search_tools" and not str(result).startswith("ERROR"):
+                            # Deferred-loading MCP tools just got revealed — refresh
+                            # the schemas handed to the model so it can call them.
+                            tool_schemas = await client.list_llm_tools()
+                            tool_names = {t["function"]["name"] for t in tool_schemas}
                     except Exception as e:
                         result = f"ERROR: {name} raised: {e}"
 
