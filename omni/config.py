@@ -6,8 +6,8 @@ from dataclasses import dataclass, field
 @dataclass
 class AgentConfig:
     model: str = "qwen3.6:35b"
-    ollama_host: str = ""   # empty = use OLLAMA_HOST env var or http://localhost:11434
-    ollama_api_key: str = ""  # empty = use OLLAMA_API_KEY env var; never hardcode this
+    llm_host: str = ""   # empty = use LLM_HOST env var or http://localhost:11434
+    llm_api_key: str = ""  # empty = use LLM_API_KEY env var; never hardcode this
 
     # All file/shell operations are confined to this directory. Paths that
     # resolve outside it are rejected before any tool runs.
@@ -58,8 +58,8 @@ class AgentConfig:
     #   "nomic-local" (default) - on-device via the `nomic` package, no
     #       server involved (needs `pip install "nomic[local]"`; the model
     #       itself downloads on first use)
-    #   any other string - an Ollama-hosted embedding model name (e.g.
-    #       "mxbai-embed-large"), fetched from ollama_host/ollama_api_key
+    #   any other string - a remote OpenAI-compatible embedding model name
+    #       (e.g. "mxbai-embed-large"), fetched from llm_host/llm_api_key
     #   "" - disabled; search_tools falls back to plain keyword matching
     # Falls back to keyword matching automatically, per call, if the
     # configured backend errors (missing dependency, model not pulled,

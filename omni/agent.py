@@ -12,7 +12,7 @@ import os
 import re
 from contextlib import nullcontext
 
-from .ollama_client import chat, OllamaError
+from .llm_client import chat, LLMError
 
 from .config import AgentConfig
 from .intent import extract_intent
@@ -160,7 +160,7 @@ class CodingAgent:
         self.session_id = None  # set by run() to whichever session the last turn used
 
     async def _call_model(self, messages: list, tool_schemas: list):
-        """Call Ollama with retries for transient errors (connection refused,
+        """Call the LLM server with retries for transient errors (connection refused,
         5xx, malformed tool-call output — small local models occasionally
         emit broken JSON)."""
         last_err = None
@@ -169,8 +169,8 @@ class CodingAgent:
             for attempt in range(1, self.cfg.max_retries + 1):
                 try:
                     return await chat(model=self.cfg.model, messages=messages, tools=tool_schemas,
-                                       base_url=self.cfg.ollama_host, api_key=self.cfg.ollama_api_key)
-                except OllamaError as e:
+                                       base_url=self.cfg.llm_host, api_key=self.cfg.llm_api_key)
+                except LLMError as e:
                     last_err = e
                     self.logger.info(f"model call failed (attempt {attempt}): {e}")
                     if _HAS_UI:
@@ -233,8 +233,8 @@ class CodingAgent:
             async with MCPToolClient(self.cfg.project_root, mcp_config_path=self.cfg.mcp_config_path or None,
                                       extra_servers=self.cfg.mcp_servers or None,
                                       embedding_model=self.cfg.embedding_model or None,
-                                      ollama_host=self.cfg.ollama_host or None,
-                                      ollama_api_key=self.cfg.ollama_api_key or None) as owned_client:
+                                      llm_host=self.cfg.llm_host or None,
+                                      llm_api_key=self.cfg.llm_api_key or None) as owned_client:
                 return await self._run_loop(task, session_id, messages, persisted, resuming, owned_client)
         except Exception as e:
             self.store.finish_session(session_id, "error", str(e))
@@ -250,7 +250,7 @@ class CodingAgent:
             spinner = ui.thinking("Parsing intent…") if _HAS_UI else nullcontext()
             with spinner:
                 intent = await extract_intent(task, intent_model, self.cfg.max_retries, self.logger,
-                                               base_url=self.cfg.ollama_host, api_key=self.cfg.ollama_api_key)
+                                               base_url=self.cfg.llm_host, api_key=self.cfg.llm_api_key)
 
             existing = {f: await client.file_exists(f) for f in intent.target_files}
             context_block = intent.as_context_block(existing)
@@ -333,7 +333,7 @@ class CodingAgent:
 
                 ok = not str(result).startswith("ERROR") and result != "Denied by human reviewer. Choose a different approach."
                 if _HAS_UI:
-                    ui.tool_result(step, name, str(result), ok)
+                    ui.tool_result(step, name, args, str(result), ok)
                 else:
                     print(f"[step {step}] {name}({args}) -> {str(result)[:200]}")
                 self.logger.info(f"[step {step}] {name}({args}) -> {str(result)[:500]}")

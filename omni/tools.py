@@ -3,12 +3,12 @@ through the project-scope path check first.
 """
 
 import difflib
-import fnmatch
 import glob as globmod
 import os
-import re
 import subprocess
 from datetime import datetime
+
+from python_ripgrep import search as _rg_search
 
 from .config import AgentConfig
 
@@ -17,6 +17,7 @@ _IGNORE_DIRS = {
     "dist", "build", ".idea", ".vscode", "target", ".mypy_cache",
     ".pytest_cache", ".tox", ".ruff_cache",
 }
+_IGNORE_GLOBS = [f"!**/{d}/**" for d in sorted(_IGNORE_DIRS)]
 
 
 class PathScopeError(Exception):
@@ -82,33 +83,29 @@ class Tools:
 
     def search_files(self, pattern: str, path: str = ".", glob: str = None,
                       case_insensitive: bool = False) -> str:
-        """Regex search across files under `path`, skipping noise directories
-        (.git, node_modules, __pycache__, build output, etc.). `glob`
-        optionally restricts which filenames are searched (e.g. "*.py")."""
+        """Regex search (via ripgrep) across files under `path`, skipping noise
+        directories (.git, node_modules, __pycache__, build output, etc.) and
+        anything .gitignore'd. `glob` optionally restricts which filenames are
+        searched (e.g. "*.py")."""
         p = _resolve_in_scope(self.cfg.project_root, path)
-        try:
-            regex = re.compile(pattern, re.IGNORECASE if case_insensitive else 0)
-        except re.error as e:
-            return f"ERROR: invalid regex pattern: {e}"
+        rg_pattern = f"(?i){pattern}" if case_insensitive else pattern
+        globs = ([glob] if glob else []) + _IGNORE_GLOBS
 
         max_matches = 1000
+        try:
+            chunks = _rg_search(patterns=[rg_pattern], paths=[p], globs=globs,
+                                 line_number=True)
+        except ValueError as e:
+            return f"ERROR: invalid regex pattern: {e}"
+
         results = []
-        for dirpath, dirnames, filenames in os.walk(p):
-            dirnames[:] = [d for d in dirnames if d not in _IGNORE_DIRS]
-            for fname in sorted(filenames):
-                if glob and not fnmatch.fnmatch(fname, glob):
+        for chunk in chunks:
+            for raw_line in chunk.splitlines():
+                if not raw_line:
                     continue
-                fpath = os.path.join(dirpath, fname)
-                try:
-                    with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
-                        for lineno, line in enumerate(f, start=1):
-                            if regex.search(line):
-                                rel = os.path.relpath(fpath, self.cfg.project_root)
-                                results.append(f"{rel}:{lineno}:{line.rstrip()}")
-                                if len(results) >= max_matches:
-                                    break
-                except OSError:
-                    continue
+                fpath, lineno, content = raw_line.split(":", 2)
+                rel = os.path.relpath(fpath, self.cfg.project_root)
+                results.append(f"{rel}:{lineno}:{content}")
                 if len(results) >= max_matches:
                     break
             if len(results) >= max_matches:
@@ -311,13 +308,23 @@ class Tools:
 
     def write_file(self, path: str, content: str, overwrite: bool = False) -> str:
         p = _resolve_in_scope(self.cfg.project_root, path)
-        if os.path.exists(p) and not overwrite:
+        exists = os.path.exists(p)
+        if exists and not overwrite:
             return (f"ERROR: {path} already exists. Use edit_file to modify it, "
                      f"or pass overwrite=true to replace it entirely.")
+        original_lines = []
+        if exists:
+            with open(p, "r", encoding="utf-8", errors="replace") as f:
+                original_lines = f.read().splitlines()
         os.makedirs(os.path.dirname(p) or ".", exist_ok=True)
         with open(p, "w", encoding="utf-8") as f:
             f.write(content)
-        return f"Wrote {len(content)} chars to {path}"
+
+        diff = "\n".join(difflib.unified_diff(
+            original_lines, content.splitlines(),
+            fromfile=f"a/{path}", tofile=f"b/{path}", lineterm="",
+        ))
+        return f"Wrote {path}.\n{_truncate(diff, self.cfg.max_output_chars)}"
 
     def preview_edit(self, path: str, old_str: str, new_str: str):
         """Dry-run version of edit_file — validates and computes the diff
@@ -341,19 +348,21 @@ class Tools:
         return True, diff
 
     def preview_write(self, path: str, content: str, overwrite: bool = False):
-        """Dry-run version of write_file. Returns (is_new: bool, preview: str).
-        If the file exists and overwrite=True, preview is a diff; if it's a
-        new file, preview is the content itself (syntax-highlighted by the UI)."""
+        """Dry-run version of write_file — validates and computes the diff
+        WITHOUT writing anything. Returns (is_new: bool, diff: str); for a
+        brand-new file, diff is a unified diff against an empty original, so
+        every line shows as an addition."""
         p = _resolve_in_scope(self.cfg.project_root, path)
-        if os.path.isfile(p) and overwrite:
+        is_new = not os.path.isfile(p)
+        original_lines = []
+        if not is_new:
             with open(p, "r", encoding="utf-8") as f:
-                original = f.read()
-            diff = "\n".join(difflib.unified_diff(
-                original.splitlines(), content.splitlines(),
-                fromfile=f"a/{path}", tofile=f"b/{path}", lineterm="",
-            ))
-            return False, diff
-        return True, content
+                original_lines = f.read().splitlines()
+        diff = "\n".join(difflib.unified_diff(
+            original_lines, content.splitlines(),
+            fromfile=f"a/{path}", tofile=f"b/{path}", lineterm="",
+        ))
+        return is_new, diff
 
     def edit_file(self, path: str, old_str: str, new_str: str) -> str:
         """Find-and-replace that requires an exact, unique match — same

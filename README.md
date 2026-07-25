@@ -8,7 +8,7 @@ pip install -e .
 No `ollama` python package required — the agent talks to an OpenAI-compatible
 chat-completions endpoint (`/api/v1/chat/completions`) directly over HTTP via
 `httpx`. This works against Ollama itself or a gateway in front of it (e.g.
-Open WebUI) — point `--ollama-host` at whichever one you're running.
+Open WebUI) — point `--llm-host` at whichever one you're running.
 
 ## Run
 ```bash
@@ -198,7 +198,7 @@ The tools live behind a real MCP server (`mcp_server.py`), not inline in the
 agent. The agent is an MCP *client* — it spawns the server as a subprocess
 (stdio transport, launched as `python -m coding_agent.mcp_server` so its
 relative imports resolve) scoped to `--project-root`, fetches the tool list,
-converts it to Ollama's function-calling schema, and calls tools through the
+converts it to OpenAI's function-calling schema, and calls tools through the
 MCP session instead of Python function calls directly.
 
 ```
@@ -215,7 +215,7 @@ MCP session instead of Python function calls directly.
                      |
                      v
 +------------------------------------------+
-|      ollama_client.py (model calls)      |
+|       llm_client.py (model calls)        |
 |    session_store.py (SQLite history)     |
 +------------------------------------------+
                      |
@@ -254,7 +254,7 @@ search_tools(query) for a "defer"-registered server's hidden tools
    |
    |-- "nomic-local" (default) --> nomic package, on-device,
    |                                no server (install below)
-   |-- <ollama-model-name>     --> ollama_client.embed() -> your Ollama server
+   |-- <remote-model-name>     --> llm_client.embed() -> your LLM server
    |-- ""                      --> skip straight to keyword match
    |
    v
@@ -392,7 +392,7 @@ query and each hidden tool's name + description, so a query doesn't need to
 share literal keywords with the tool it's after:
 ```bash
 coding-agent --embedding-model "" "task"                 # disable, plain keyword match only
-coding-agent --embedding-model mxbai-embed-large "task"  # use an Ollama-hosted embedding model instead
+coding-agent --embedding-model mxbai-embed-large "task"  # use a remote OpenAI-compatible embedding model instead
 ```
 - **Default (`nomic-local`)** — runs on-device via the `nomic` package, no
   server or API key involved. It's declared as this project's own
@@ -405,8 +405,8 @@ coding-agent --embedding-model mxbai-embed-large "task"  # use an Ollama-hosted 
   itself downloads on first use). Without it installed, `search_tools`
   automatically falls back to plain keyword matching and says so in its
   result.
-- **An Ollama model name** (e.g. `mxbai-embed-large`) instead embeds via the
-  same `--ollama-host`/`--ollama-api-key` this agent already talks to for
+- **A remote model name** (e.g. `mxbai-embed-large`) instead embeds via the
+  same `--llm-host`/`--llm-api-key` this agent already talks to for
   chat — pull it there first (`ollama pull mxbai-embed-large`).
 - **`""`** disables semantic ranking outright; `search_tools` then requires
   every word in the query to literally appear in a tool's name/description.
@@ -420,21 +420,21 @@ All modules live under `coding_agent/`:
 - `intent.py` — parses the freeform task into structured intent (task_type, target_files, constraints, risk_level)
 - `tools.py` — tool implementations, each scoped to `project_root` (used by `mcp_server.py`, not called directly by the agent anymore) — read/write/edit/search/shell, a full git toolset, and `save_memory`
 - `mcp_server.py` — MCP server exposing those tools over stdio
-- `mcp_client.py` — async MCP client the agent uses to reach the server; also merges in any custom MCP servers, and implements deferred tool loading + the `search_tools` tool (semantic ranking via `nomic[local]` or an Ollama embedding model, falling back to keyword matching)
-- `ollama_client.py` — raw `httpx` client for the model's OpenAI-compatible chat-completions endpoint (`chat()`) and embeddings endpoint (`embed()`, used by `mcp_client.py`'s `search_tools`) — no `ollama` package dependency
+- `mcp_client.py` — async MCP client the agent uses to reach the server; also merges in any custom MCP servers, and implements deferred tool loading + the `search_tools` tool (semantic ranking via `nomic[local]` or a remote embedding model, falling back to keyword matching)
+- `llm_client.py` — raw `httpx` client for the model's OpenAI-compatible chat-completions endpoint (`chat()`) and embeddings endpoint (`embed()`, used by `mcp_client.py`'s `search_tools`) — no vendor SDK dependency, works against any OpenAI-compatible server
 - `session_store.py` — SQLite persistence for sessions and their full message history (resume/list/interactive mode)
 - `ui.py` — rich terminal rendering (diffs, panels, approval prompts, session tables) — purely presentational
 - `agent.py` — the loop: parse intent, call model, approve, execute via MCP, persist, repeat
 - `cli.py` — command-line entry point (Typer — `coding-agent --help` for auto-generated, always-in-sync docs)
 - `__main__.py` — enables `python -m coding_agent`
 
-Point at a non-default Ollama host with `--ollama-host http://some-host:11434`
-or the `OLLAMA_HOST` env var (checked in that order).
+Point at a non-default host with `--llm-host http://some-host:11434`
+or the `LLM_HOST` env var (checked in that order).
 
-If your Ollama endpoint sits behind an authenticated proxy, set the key via
+If your LLM endpoint sits behind an authenticated proxy, set the key via
 environment variable rather than the CLI flag — it avoids the token landing
 in your shell history:
 ```bash
-export OLLAMA_API_KEY="sk-..."
-coding-agent "task" --project-root ./repo --ollama-host http://your-host:8080
+export LLM_API_KEY="sk-..."
+coding-agent "task" --project-root ./repo --llm-host http://your-host:8080
 ```

@@ -1,7 +1,8 @@
-"""Talks to Ollama directly over HTTP (/api/chat) — no `ollama` python
-package required, just httpx. Mirrors the message shape the rest of the
-agent already expects: chat() returns the `message` dict with
-role/content/tool_calls, same as the ollama library did.
+"""Talks to any OpenAI-compatible chat-completions server over HTTP — no
+vendor SDK required, just httpx. Works against Ollama, vLLM, LM Studio,
+llama.cpp's server, TGI, Open WebUI, OpenRouter, or OpenAI itself. chat()
+returns the `message` dict with role/content/tool_calls, same shape every
+one of those servers already returns.
 """
 
 import json
@@ -9,8 +10,8 @@ import os
 
 import httpx
 
-DEFAULT_BASE_URL = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
-DEFAULT_API_KEY = os.environ.get("OLLAMA_API_KEY", "")  # set via env, never hardcode
+DEFAULT_BASE_URL = os.environ.get("LLM_HOST", "http://localhost:11434")
+DEFAULT_API_KEY = os.environ.get("LLM_API_KEY", "")  # set via env, never hardcode
 
 
 def _normalize_tool_call(call: dict) -> dict:
@@ -47,7 +48,7 @@ def _normalize_messages(messages: list) -> list:
     return normalized
 
 
-class OllamaError(Exception):
+class LLMError(Exception):
     pass
 
 
@@ -60,19 +61,16 @@ async def chat(
     api_key: str = None,
     timeout: float = 120.0,
 ) -> dict:
-    """POST /api/v1/chat/completions (OpenAI-compatible) with stream=false
-    and return the `message` dict.
+    """POST /v1/chat/completions (OpenAI-compatible) with stream=false and
+    return the `message` dict.
 
-    This hits our Open WebUI gateway in front of Ollama, not Ollama's native
-    /api/chat — the gateway only exposes the OpenAI-style route. Response
-    shape is `choices[0].message`, but that dict already has the
-    role/content/tool_calls keys the rest of the agent expects, same as
-    Ollama's native `message` field would.
+    Response shape is `choices[0].message`, which already has the
+    role/content/tool_calls keys the rest of the agent expects.
 
-    If an API key is set (via `api_key`, falling back to $OLLAMA_API_KEY),
+    If an API key is set (via `api_key`, falling back to $LLM_API_KEY),
     it's sent as `Authorization: Bearer <key>`.
 
-    Raises OllamaError on a non-2xx response, a connection failure, or an
+    Raises LLMError on a non-2xx response, a connection failure, or an
     unexpected response shape — callers (agent.py, intent.py) already retry
     on this.
     """
@@ -93,18 +91,18 @@ async def chat(
             data = resp.json()
     except httpx.HTTPStatusError as e:
         body = e.response.text[:300]
-        raise OllamaError(f"Ollama API returned {e.response.status_code} for {model}: {body}") from e
+        raise LLMError(f"LLM API returned {e.response.status_code} for {model}: {body}") from e
     except httpx.RequestError as e:
-        raise OllamaError(
-            f"Could not reach Ollama at {url} ({e}). Is `ollama serve` running?"
+        raise LLMError(
+            f"Could not reach the LLM server at {url} ({e}). Is it running?"
         ) from e
 
     choices = data.get("choices")
     if not choices:
-        raise OllamaError(f"Unexpected response shape from Ollama (no 'choices' key): {data}")
+        raise LLMError(f"Unexpected response shape from LLM server (no 'choices' key): {data}")
     message = choices[0].get("message")
     if message is None:
-        raise OllamaError(f"Unexpected response shape from Ollama (no 'message' key): {data}")
+        raise LLMError(f"Unexpected response shape from LLM server (no 'message' key): {data}")
     return message
 
 
@@ -120,7 +118,7 @@ async def embed(
     (mcp_client.py) — a plain vector lookup, so it's much cheaper than a
     chat() round-trip.
 
-    Raises OllamaError on a non-2xx response, a connection failure, or an
+    Raises LLMError on a non-2xx response, a connection failure, or an
     unexpected response shape — same as chat()."""
     url = f"{(base_url or DEFAULT_BASE_URL).rstrip('/')}/v1/embeddings"
     payload = {"model": model, "input": input}
@@ -135,16 +133,16 @@ async def embed(
             data = resp.json()
     except httpx.HTTPStatusError as e:
         body = e.response.text[:300]
-        raise OllamaError(f"Ollama API returned {e.response.status_code} for embedding model {model}: {body}") from e
+        raise LLMError(f"LLM API returned {e.response.status_code} for embedding model {model}: {body}") from e
     except httpx.RequestError as e:
-        raise OllamaError(
-            f"Could not reach Ollama at {url} ({e}). Is `ollama serve` running?"
+        raise LLMError(
+            f"Could not reach the LLM server at {url} ({e}). Is it running?"
         ) from e
 
     items = data.get("data")
     if not items:
-        raise OllamaError(f"Unexpected response shape from Ollama embeddings (no 'data' key): {data}")
+        raise LLMError(f"Unexpected response shape from LLM embeddings (no 'data' key): {data}")
     try:
         return [item["embedding"] for item in items]
     except (KeyError, TypeError) as e:
-        raise OllamaError(f"Unexpected response shape from Ollama embeddings (no 'embedding' key): {data}") from e
+        raise LLMError(f"Unexpected response shape from LLM embeddings (no 'embedding' key): {data}") from e

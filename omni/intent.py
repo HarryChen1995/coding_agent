@@ -13,7 +13,7 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import List
 
-from .ollama_client import chat, OllamaError
+from .llm_client import chat, LLMError
 
 _CODE_FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.MULTILINE)
 
@@ -122,7 +122,7 @@ async def extract_intent(task: str, model: str, max_retries: int = 3, logger=Non
             if logger:
                 logger.info(f"INTENT parsed (attempt {attempt}): {data}")
             return intent
-        except (json.JSONDecodeError, KeyError, OllamaError) as e:
+        except (json.JSONDecodeError, KeyError, LLMError) as e:
             last_err = e
             if logger:
                 logger.info(f"INTENT parse failed (attempt {attempt}): {e}")

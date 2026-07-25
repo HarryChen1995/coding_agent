@@ -49,7 +49,7 @@ from .mcp_client import (
 )
 from .session_store import SessionStore
 
-app = typer.Typer(add_completion=False, help="Coding agent (Ollama + Qwen Coder)")
+app = typer.Typer(add_completion=False, help="Coding agent (Qwen Coder or any OpenAI-compatible model)")
 
 
 @app.command()
@@ -59,14 +59,14 @@ def main(
                    "with no new instruction) or --list-sessions.",
     ),
     project_root: str = typer.Option(".", "--project-root", "-p", help="Directory the agent is scoped to"),
-    model: str = typer.Option("qwen3.6:35b", "--model", "-m", help="Ollama model to drive the agent"),
-    ollama_host: Optional[str] = typer.Option(
-        None, "--ollama-host", help="Ollama server URL (defaults to $OLLAMA_HOST or http://localhost:11434)",
+    model: str = typer.Option("qwen3.6:35b", "--model", "-m", help="Model name to drive the agent"),
+    llm_host: Optional[str] = typer.Option(
+        None, "--llm-host", help="OpenAI-compatible server URL (defaults to $LLM_HOST or http://localhost:11434)",
     ),
-    ollama_api_key: Optional[str] = typer.Option(
-        None, "--ollama-api-key",
-        help="Bearer token if Ollama sits behind an authenticated proxy "
-             "(defaults to $OLLAMA_API_KEY — prefer the env var over this flag "
+    llm_api_key: Optional[str] = typer.Option(
+        None, "--llm-api-key",
+        help="Bearer token if the LLM server sits behind an authenticated proxy "
+             "(defaults to $LLM_API_KEY — prefer the env var over this flag "
              "so the key doesn't end up in your shell history).",
     ),
     max_steps: int = typer.Option(100, "--max-steps", help="Hard cap on agent loop iterations"),
@@ -87,7 +87,7 @@ def main(
         None, "--embedding-model",
         help="Embedding backend for search_tools semantic ranking against deferred MCP tool "
              'descriptions. Defaults to "nomic-local" — on-device via `pip install "nomic[local]"`, '
-             "no server needed. Pass an Ollama-hosted embedding model name (e.g. mxbai-embed-large) "
+             "no server needed. Pass a remote OpenAI-compatible embedding model name (e.g. mxbai-embed-large) "
              'to use that instead, or "" to disable and fall back to plain keyword matching.',
     ),
     db_path: str = typer.Option(
@@ -208,8 +208,8 @@ def main(
 
     cfg = AgentConfig(
         model=model,
-        ollama_host=ollama_host or "",
-        ollama_api_key=ollama_api_key or "",
+        llm_host=llm_host or "",
+        llm_api_key=llm_api_key or "",
         project_root=project_root,
         max_steps=max_steps,
         auto_approve=auto_approve,
@@ -282,8 +282,8 @@ async def _interactive(cfg: AgentConfig, resume: Optional[str], session_name: Op
     async with MCPToolClient(cfg.project_root, mcp_config_path=cfg.mcp_config_path or None,
                               extra_servers=cfg.mcp_servers or None,
                               embedding_model=cfg.embedding_model or None,
-                              ollama_host=cfg.ollama_host or None,
-                              ollama_api_key=cfg.ollama_api_key or None) as client:
+                              llm_host=cfg.llm_host or None,
+                              llm_api_key=cfg.llm_api_key or None) as client:
         with stdout_cm:
             while True:
                 try:

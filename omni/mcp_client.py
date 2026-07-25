@@ -23,7 +23,7 @@ from mcp.client.sse import sse_client
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.client.streamable_http import streamablehttp_client
 
-from .ollama_client import OllamaError, embed
+from .llm_client import LLMError, embed
 
 _BUILTIN = "_builtin"
 _TRANSPORTS = ("sse", "streamable_http")
@@ -35,8 +35,8 @@ _NOMIC_MODEL_NAME = "nomic-embed-text-v1.5"  # concrete model the local backend 
 
 
 class EmbeddingUnavailable(Exception):
-    """Raised by either embedding backend (local nomic or an Ollama-hosted
-    model) when it can't produce vectors — missing dependency, model not
+    """Raised by either embedding backend (local nomic or a remote
+    OpenAI-compatible embedding model) when it can't produce vectors — missing dependency, model not
     pulled, network error. Caught by search_mcp_tools() to fall back to
     keyword matching rather than breaking the tool call."""
 
@@ -158,7 +158,7 @@ def load_mcp_config(path: str) -> dict:
     return servers
 
 
-def _mcp_schema_to_ollama(tool, exposed_name: str) -> dict:
+def _mcp_schema_to_tool_schema(tool, exposed_name: str) -> dict:
     return {
         "type": "function",
         "function": {
@@ -213,7 +213,7 @@ class MCPToolClient:
 
     def __init__(self, project_root: str, server_path: str = None,
                  mcp_config_path: str = None, extra_servers: dict = None,
-                 embedding_model: str = "", ollama_host: str = None, ollama_api_key: str = None):
+                 embedding_model: str = "", llm_host: str = None, llm_api_key: str = None):
         self.project_root = project_root
         # Default: run the built-in server as `python -m <package>.mcp_server`
         # rather than by file path — mcp_server.py uses relative imports
@@ -226,11 +226,11 @@ class MCPToolClient:
         self.extra_servers = extra_servers or {}
         # Embedding backend for semantic search_tools ranking:
         # "nomic-local" (default) -> on-device via the `nomic` package;
-        # any other name -> an Ollama-hosted embedding model;
+        # any other name -> a remote OpenAI-compatible embedding model;
         # "" -> disabled (falls back to keyword matching in search_mcp_tools).
         self.embedding_model = embedding_model or ""
-        self.ollama_host = ollama_host
-        self.ollama_api_key = ollama_api_key
+        self.llm_host = llm_host
+        self.llm_api_key = llm_api_key
         self._stack = AsyncExitStack()
         self._sessions: dict = {}     # server name -> ClientSession
         self._tool_owner: dict = {}   # exposed tool name -> (server name, real tool name)
@@ -308,7 +308,7 @@ class MCPToolClient:
                 else:
                     exposed_name = f"{server_name}__{tool.name}"
                 self._tool_owner[exposed_name] = (server_name, tool.name)
-                schema = _mcp_schema_to_ollama(tool, exposed_name)
+                schema = _mcp_schema_to_tool_schema(tool, exposed_name)
                 if server_name in self._deferred_servers and exposed_name not in self._revealed:
                     self._deferred_tools[exposed_name] = schema
                 else:
@@ -341,7 +341,7 @@ class MCPToolClient:
         except ImportError as e:
             raise EmbeddingUnavailable(
                 'the "nomic" package isn\'t installed — run `pip install "nomic[local]"`, '
-                "or set --embedding-model to an Ollama-hosted embedding model instead"
+                "or set --embedding-model to a remote OpenAI-compatible embedding model instead"
             ) from e
 
         def _run():
@@ -357,13 +357,13 @@ class MCPToolClient:
 
     async def _embed_texts(self, texts: list, task_type: str) -> list:
         """Route to the local nomic[local] backend (the default,
-        self.embedding_model == _LOCAL_NOMIC_MODEL) or an Ollama-hosted
+        self.embedding_model == _LOCAL_NOMIC_MODEL) or a remote OpenAI-compatible
         embedding model (any other non-empty self.embedding_model)."""
         if self.embedding_model == _LOCAL_NOMIC_MODEL:
             return await self._embed_local_nomic(texts, task_type)
         try:
-            return await embed(self.embedding_model, texts, base_url=self.ollama_host, api_key=self.ollama_api_key)
-        except OllamaError as e:
+            return await embed(self.embedding_model, texts, base_url=self.llm_host, api_key=self.llm_api_key)
+        except LLMError as e:
             raise EmbeddingUnavailable(str(e)) from e
 
     async def _semantic_match(self, query: str) -> list:
@@ -395,7 +395,7 @@ class MCPToolClient:
     async def search_mcp_tools(self, query: str) -> str:
         """Reveal deferred tools matching `query` — semantically (cosine
         similarity over embeddings, computed either on-device via `nomic`
-        or by an Ollama-hosted model, per self.embedding_model) when
+        or by a remote OpenAI-compatible model, per self.embedding_model) when
         enabled, falling back to keyword substring matching otherwise or if
         the embedding backend errors. Empty query reveals everything still
         hidden. Matches are recorded in `self._revealed` so the next

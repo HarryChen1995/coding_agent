@@ -1,7 +1,7 @@
 # Ollama Coding Agent
 
 An AI coding agent that plans, edits, and tests code by driving Qwen Coder
-(or any Ollama-compatible model) through a scoped set of file and shell
+(or any OpenAI-compatible model) through a scoped set of file and shell
 tools, with human approval on every write, edit, or shell command.
 
 ## Install
@@ -64,7 +64,7 @@ Run `coding-agent --help` for the full option list.
 - **Deferred tool loading + semantic search_tools** — register a custom MCP
   server with `--defer` and its tools stay out of the model's context until
   a synthesized `search_tools` tool loads matching ones on demand, ranked by
-  on-device embeddings (`nomic-local`, default) or an Ollama-hosted
+  on-device embeddings (`nomic-local`, default) or a remote OpenAI-compatible
   embedding model, with automatic keyword-match fallback.
 
 ## Architecture
@@ -130,15 +130,15 @@ Append `,defer` (or pass `--defer` with `--add-mcp-server`) to keep a
 server's tools out of the model's default tool list — it discovers them on
 demand via `search_tools`, ranked semantically by default
 (`pip install "ollama-coding-agent[local-embeddings]"` for on-device
-embeddings, or point `--embedding-model` at an Ollama-hosted one instead;
+embeddings, or point `--embedding-model` at a remote one instead;
 `--embedding-model ""` falls back to plain keyword matching). See the full
 README for details.
 
 ## Configuration
 
-Point at any Ollama-compatible host with `--ollama-host` or the
-`OLLAMA_HOST` env var. If it sits behind an authenticated proxy, set
-`OLLAMA_API_KEY` as an environment variable rather than a CLI flag so the
+Point at any OpenAI-compatible host with `--llm-host` or the
+`LLM_HOST` env var. If it sits behind an authenticated proxy, set
+`LLM_API_KEY` as an environment variable rather than a CLI flag so the
 key doesn't end up in shell history.
 
 ## Links

@@ -5,7 +5,6 @@ isn't installed, agent.py falls back to plain print() (see its import guard).
 """
 
 import json
-import os
 import re
 
 from prompt_toolkit.formatted_text import HTML
@@ -60,6 +59,20 @@ def _render_diff(diff_text: str) -> Text:
     return body
 
 
+def _diff_stats(diff_text: str) -> tuple:
+    """Count added/removed lines in a unified diff, ignoring the --- /+++
+    file-header lines."""
+    added = removed = 0
+    for line in diff_text.splitlines():
+        if line.startswith("+++") or line.startswith("---"):
+            continue
+        if line.startswith("+"):
+            added += 1
+        elif line.startswith("-"):
+            removed += 1
+    return added, removed
+
+
 def _search_summary(result: str) -> str:
     """search_files results can be dozens of matched lines — the step log
     should read as a count, not a code dump (the model still gets the full
@@ -81,18 +94,6 @@ def _read_summary(result: str) -> str:
     return f"{len(lines)} line{'s' if len(lines) != 1 else ''} ({len(result)} chars)"
 
 _STATUS_COLOR = {"done": "green", "running": "yellow", "max_steps": "yellow", "error": "red"}
-
-_LEXER_BY_EXT = {
-    ".py": "python", ".js": "javascript", ".ts": "typescript", ".tsx": "tsx",
-    ".jsx": "jsx", ".go": "go", ".rs": "rust", ".java": "java", ".rb": "ruby",
-    ".c": "c", ".cpp": "cpp", ".h": "c", ".sh": "bash", ".yaml": "yaml",
-    ".yml": "yaml", ".json": "json", ".md": "markdown", ".sql": "sql",
-    ".html": "html", ".css": "css",
-}
-
-
-def _lexer_for(path: str) -> str:
-    return _LEXER_BY_EXT.get(os.path.splitext(path)[1], "text")
 
 
 def banner(task: str, model: str):
@@ -205,21 +206,21 @@ async def request_approval(name: str, args: dict, client) -> bool:
     `client` is an MCPToolClient — previews go through the same MCP server
     the real tool calls do, just via the read-only _preview_* tools."""
     if name == "edit_file":
-        ok, preview = await client.preview_edit(args.get("path", ""), args.get("old_str", ""), args.get("new_str", ""))
+        path = args.get("path", "")
+        ok, preview = await client.preview_edit(path, args.get("old_str", ""), args.get("new_str", ""))
         if not ok:
-            console.print(Panel(f"[red]{preview}[/red]", title=f"edit_file: {args.get('path')}", border_style="red"))
+            console.print(Panel(f"[red]{preview}[/red]", title=f"edit_file: {path}", border_style="red"))
             return False
-        console.print(Panel(_render_diff(preview),
-                             title=f"edit_file: {args.get('path')}", border_style="yellow"))
+        added, removed = _diff_stats(preview)
+        title = f"edit_file: {path}  [green]+{added}[/green] [red]-{removed}[/red]"
+        console.print(Panel(_render_diff(preview), title=title, border_style="yellow"))
     elif name == "write_file":
         path = args.get("path", "")
         is_new, preview = await client.preview_write(path, args.get("content", ""), args.get("overwrite", False))
-        if is_new:
-            console.print(Panel(Syntax(preview, _lexer_for(path), theme="ansi_dark", word_wrap=True),
-                                 title=f"write_file (new): {path}", border_style="green"))
-        else:
-            console.print(Panel(_render_diff(preview),
-                                 title=f"write_file (overwrite): {path}", border_style="yellow"))
+        added, removed = _diff_stats(preview)
+        label = "new" if is_new else "overwrite"
+        title = f"write_file ({label}): {path}  [green]+{added}[/green] [red]-{removed}[/red]"
+        console.print(Panel(_render_diff(preview), title=title, border_style="green" if is_new else "yellow"))
     elif name == "run_shell":
         cmd = args.get("command", "")
         console.print(Panel(Syntax(cmd, "bash", theme="ansi_dark"),
@@ -230,19 +231,29 @@ async def request_approval(name: str, args: dict, client) -> bool:
     return Confirm.ask("[bold]Proceed?[/bold]", default=False)
 
 
-def tool_result(step: int, name: str, result: str, ok: bool):
+_DIFF_TOOLS = {"edit_file", "write_file"}
+
+
+def tool_result(step: int, name: str, args: dict, result: str, ok: bool):
     icon = "[green]✓[/green]" if ok else "[red]✗[/red]"
+    path = args.get("path", "") if isinstance(args, dict) else ""
+    diff_body = None
+    if ok and name in _DIFF_TOOLS and "\n" in result:
+        diff_body = result.split("\n", 1)[1]
+
     if ok and name == "search_files":
         summary = _search_summary(result)
     elif ok and name == "read_file":
         summary = _read_summary(result)
+    elif diff_body is not None:
+        added, removed = _diff_stats(diff_body)
+        summary = f"{path}  +{added} -{removed}"
     else:
         summary = result.splitlines()[0] if result else ""
     console.print(f"  {icon} {summary[:160]}")
-    # For edits, show the diff body under the summary line — with a line
-    # number gutter and red/green highlighting for removed/added lines.
-    if ok and name == "edit_file" and "\n" in result:
-        diff_body = result.split("\n", 1)[1]
+    # For writes/edits, show the diff body under the summary line — with a
+    # line number gutter and red/green highlighting for removed/added lines.
+    if diff_body is not None:
         console.print(_render_diff(diff_body))
 
 
