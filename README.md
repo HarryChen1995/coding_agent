@@ -253,7 +253,7 @@ search_tools(query) for a "defer"-registered server's hidden tools
               embedding_model?
    |
    |-- "nomic-local" (default) --> nomic package, on-device,
-   |                                no server (pip install "nomic[local]")
+   |                                no server (install below)
    |-- <ollama-model-name>     --> ollama_client.embed() -> your Ollama server
    |-- ""                      --> skip straight to keyword match
    |
@@ -395,13 +395,16 @@ coding-agent --embedding-model "" "task"                 # disable, plain keywor
 coding-agent --embedding-model mxbai-embed-large "task"  # use an Ollama-hosted embedding model instead
 ```
 - **Default (`nomic-local`)** — runs on-device via the `nomic` package, no
-  server or API key involved. Install it with:
+  server or API key involved. It's declared as this project's own
+  `local-embeddings` extra (`pyproject.toml`), so install it with:
   ```bash
-  pip install "nomic[local]"
+  pip install "ollama-coding-agent[local-embeddings]"   # from PyPI
+  pip install -e ".[local-embeddings]"                  # from a local checkout
   ```
-  (an optional extra, not a hard dependency — the model itself downloads on
-  first use). Without it installed, `search_tools` automatically falls back
-  to plain keyword matching and says so in its result.
+  (optional, not a hard dependency — pulls in `nomic[local]`, and the model
+  itself downloads on first use). Without it installed, `search_tools`
+  automatically falls back to plain keyword matching and says so in its
+  result.
 - **An Ollama model name** (e.g. `mxbai-embed-large`) instead embeds via the
   same `--ollama-host`/`--ollama-api-key` this agent already talks to for
   chat — pull it there first (`ollama pull mxbai-embed-large`).

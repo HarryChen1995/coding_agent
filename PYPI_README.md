@@ -129,9 +129,10 @@ need to be `-m`-invokable, a standalone script's absolute path works too
 Append `,defer` (or pass `--defer` with `--add-mcp-server`) to keep a
 server's tools out of the model's default tool list — it discovers them on
 demand via `search_tools`, ranked semantically by default
-(`pip install "nomic[local]"` for on-device embeddings, or point
-`--embedding-model` at an Ollama-hosted one; `--embedding-model ""` falls
-back to plain keyword matching). See the full README for details.
+(`pip install "ollama-coding-agent[local-embeddings]"` for on-device
+embeddings, or point `--embedding-model` at an Ollama-hosted one instead;
+`--embedding-model ""` falls back to plain keyword matching). See the full
+README for details.
 
 ## Configuration
 
