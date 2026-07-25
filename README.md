@@ -1,14 +1,15 @@
-# Coding Agent (Ollama + Qwen Coder)
+# Omni Coder
 
 ## Setup
 ```bash
-ollama pull qwen3-coder:30b
+ollama pull qwen3-coder:30b   # example: pulling the default model via Ollama
 pip install -e .
 ```
-No `ollama` python package required — the agent talks to an OpenAI-compatible
+No vendor SDK required — the agent talks to an OpenAI-compatible
 chat-completions endpoint (`/api/v1/chat/completions`) directly over HTTP via
-`httpx`. This works against Ollama itself or a gateway in front of it (e.g.
-Open WebUI) — point `--llm-host` at whichever one you're running.
+`httpx`. This works against Ollama, vLLM, LM Studio, or any other
+OpenAI-compatible server/gateway (e.g. Open WebUI) — point `--llm-host` at
+whichever one you're running.
 
 ## Run
 ```bash

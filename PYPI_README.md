@@ -1,4 +1,4 @@
-# Ollama Coding Agent
+# Omni Coder
 
 An AI coding agent that plans, edits, and tests code by driving Qwen Coder
 (or any OpenAI-compatible model) through a scoped set of file and shell
@@ -8,7 +8,7 @@ tools, with human approval on every write, edit, or shell command.
 
 ```bash
 pip install omni-coder
-ollama pull qwen3-coder:30b
+ollama pull qwen3-coder:30b   # example: pulling the default model via Ollama
 ```
 
 ## Usage
