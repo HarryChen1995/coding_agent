@@ -36,7 +36,7 @@ Repository = "https://github.com/HarryChen1995/omni-coder"
 Issues = "https://github.com/HarryChen1995/omni-coder/issues"
 
 [project.scripts]
-coding-agent = "omni.cli:app"
+omni = "omni.cli:app"
 
 [tool.setuptools.packages.find]
 include = ["omni*"]

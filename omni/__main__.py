@@ -1,4 +1,4 @@
-"""Enables `python -m coding_agent`."""
+"""Enables `python -m omni`."""
 
 from .cli import app
 

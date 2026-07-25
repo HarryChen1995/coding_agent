@@ -55,7 +55,7 @@ def _load_project_memory(project_root: str, memory_path: str) -> str:
 
 
 def _setup_logger(log_path: str) -> logging.Logger:
-    logger = logging.getLogger("coding_agent")
+    logger = logging.getLogger("omni")
     logger.setLevel(logging.INFO)
     logger.handlers.clear()
     fh = logging.FileHandler(log_path, encoding="utf-8")

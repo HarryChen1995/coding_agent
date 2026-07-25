@@ -13,14 +13,14 @@ whichever one you're running.
 
 ## Run
 ```bash
-coding-agent "Add type hints to utils.py, then run the test suite" \
+omni "Add type hints to utils.py, then run the test suite" \
     --project-root ./myrepo
 ```
 Equivalent alternative: `python -m omni "..." --project-root ./myrepo`.
 
 Add `--auto-approve` to skip confirmation prompts (only in an already-isolated
 environment, e.g. a container you're fine getting wiped). Add `--max-steps N`
-to change the default cap of 100 agent-loop iterations. Run `coding-agent --help`
+to change the default cap of 100 agent-loop iterations. Run `omni --help`
 for the full option list — it's a Typer app, so `--help` is auto-generated and
 kept in sync with the code.
 
@@ -124,9 +124,9 @@ moment it's created; nothing extra to opt into.
 
 **Resume a previous run:**
 ```bash
-coding-agent "Add type hints to utils.py" --session-name utils-typing
+omni "Add type hints to utils.py" --session-name utils-typing
 # ...later, in the same or a different terminal...
-coding-agent --resume utils-typing "Also add docstrings"
+omni --resume utils-typing "Also add docstrings"
 ```
 `--resume` accepts either the session id it printed at the end of a run, or
 the `--session-name` you gave it. `--session-name` is optional — without it
@@ -137,14 +137,14 @@ context carried over rather than just trusting it happened in the background.
 
 **Browse saved sessions:**
 ```bash
-coding-agent --list-sessions
+omni --list-sessions
 ```
 Shows id, name, status (`running` / `done` / `max_steps` / `error`), last
 updated time, model, and the original task for each session.
 
 **Delete a session:**
 ```bash
-coding-agent --delete-session utils-typing
+omni --delete-session utils-typing
 ```
 Removes the session and its full message history. Also available as
 `/delete <id-or-name>` from inside interactive mode.
@@ -152,8 +152,8 @@ Removes the session and its full message history. Also available as
 **Interactive mode** — omit the task argument entirely to get a REPL instead
 of a one-shot run:
 ```bash
-coding-agent --project-root ./myrepo              # fresh session, prompts for input
-coding-agent --resume utils-typing                 # resumes and prompts for input
+omni --project-root ./myrepo              # fresh session, prompts for input
+omni --resume utils-typing                 # resumes and prompts for input
 ```
 Type a task and press enter to run it; the conversation (and the MCP tool
 connection) stays alive between turns, so follow-ups don't pay the cost of
@@ -297,20 +297,20 @@ URL** (SSE or Streamable HTTP):
 **Register one permanently** — available on every future run, in any
 project, with zero flags from then on:
 ```bash
-coding-agent --add-mcp-server "weather=python -m weather_mcp_server"     # local, stdio
-coding-agent --add-mcp-server "weather=https://example.com/mcp/sse"      # remote, SSE
-coding-agent "what's the forecast?"   # picked up automatically
+omni --add-mcp-server "weather=python -m weather_mcp_server"     # local, stdio
+omni --add-mcp-server "weather=https://example.com/mcp/sse"      # remote, SSE
+omni "what's the forecast?"   # picked up automatically
 ```
 Saved to `~/.coding_agent/mcp.json` and auto-loaded whenever `--mcp-config`
 isn't explicitly passed. Manage the registry with:
 ```bash
-coding-agent --list-mcp-servers
-coding-agent --remove-mcp-server weather
+omni --list-mcp-servers
+omni --remove-mcp-server weather
 ```
 
 **Add one for a single run** instead, without saving it:
 ```bash
-coding-agent --mcp-server "weather=python -m weather_mcp_server" "task"
+omni --mcp-server "weather=python -m weather_mcp_server" "task"
 ```
 Repeatable for multiple servers.
 
@@ -329,7 +329,7 @@ handy when servers need env vars/auth headers or there are a lot of them):
 }
 ```
 ```bash
-coding-agent --mcp-config ./mcp.json "task"
+omni --mcp-config ./mcp.json "task"
 ```
 
 All three sources can be combined; `--mcp-server` wins over `--mcp-config`
@@ -346,7 +346,7 @@ global registry.
   doesn't need to be `-m`-invokable; a standalone script works too, e.g.
   `"myserver=python C:/absolute/path/to/mcp_server.py"`. Use an **absolute
   path** for a script file — it's resolved relative to wherever you happen
-  to run `coding-agent` from (not `--project-root`), so a relative path
+  to run `omni` from (not `--project-root`), so a relative path
   breaks the moment you run the command from a different directory.
 - The compact `--mcp-server`/`--add-mcp-server` string format doesn't
   support auth headers — use `--mcp-config` with a JSON file when the
@@ -365,12 +365,12 @@ tool search makes for its own rarely-used tools.
 Mark a server as deferred the same three ways you'd register one:
 ```bash
 # permanently, via the global registry
-coding-agent --add-mcp-server "docs=node docs-server.js" --defer
+omni --add-mcp-server "docs=node docs-server.js" --defer
 
 # for a single run, via the compact spec (",defer" suffix works for
 # stdio and remote/URL specs alike)
-coding-agent --mcp-server "docs=node docs-server.js,defer" "task"
-coding-agent --mcp-server "docs=https://example.com/mcp,streamable_http,defer" "task"
+omni --mcp-server "docs=node docs-server.js,defer" "task"
+omni --mcp-server "docs=https://example.com/mcp,streamable_http,defer" "task"
 ```
 or in a `--mcp-config` JSON file, add `"defer": true` to that server's entry:
 ```json
@@ -392,8 +392,8 @@ again. An empty query reveals everything still hidden at once.
 query and each hidden tool's name + description, so a query doesn't need to
 share literal keywords with the tool it's after:
 ```bash
-coding-agent --embedding-model "" "task"                 # disable, plain keyword match only
-coding-agent --embedding-model mxbai-embed-large "task"  # use a remote OpenAI-compatible embedding model instead
+omni --embedding-model "" "task"                 # disable, plain keyword match only
+omni --embedding-model mxbai-embed-large "task"  # use a remote OpenAI-compatible embedding model instead
 ```
 - **Default (`nomic-local`)** — runs on-device via the `nomic` package, no
   server or API key involved. It's declared as this project's own
@@ -426,7 +426,7 @@ All modules live under `omni/`:
 - `session_store.py` — SQLite persistence for sessions and their full message history (resume/list/interactive mode)
 - `ui.py` — rich terminal rendering (diffs, panels, approval prompts, session tables) — purely presentational
 - `agent.py` — the loop: parse intent, call model, approve, execute via MCP, persist, repeat
-- `cli.py` — command-line entry point (Typer — `coding-agent --help` for auto-generated, always-in-sync docs)
+- `cli.py` — command-line entry point (Typer — `omni --help` for auto-generated, always-in-sync docs)
 - `__main__.py` — enables `python -m omni`
 
 Point at a non-default host with `--llm-host http://some-host:11434`
@@ -437,5 +437,5 @@ environment variable rather than the CLI flag — it avoids the token landing
 in your shell history:
 ```bash
 export LLM_API_KEY="sk-..."
-coding-agent "task" --project-root ./repo --llm-host http://your-host:8080
+omni "task" --project-root ./repo --llm-host http://your-host:8080
 ```

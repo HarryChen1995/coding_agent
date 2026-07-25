@@ -1,7 +1,7 @@
 """MCP server exposing the coding tools, each scoped to a project root.
 
 Run standalone to test with any MCP client:
-    AGENT_PROJECT_ROOT=/path/to/repo python -m coding_agent.mcp_server
+    AGENT_PROJECT_ROOT=/path/to/repo python -m omni.mcp_server
 
 Any MCP-compatible client (not just this agent) can now use these tools —
 Claude Desktop, another agent framework, etc. — all sharing the same
@@ -20,7 +20,7 @@ PROJECT_ROOT = os.environ.get("AGENT_PROJECT_ROOT", ".")
 cfg = AgentConfig(project_root=PROJECT_ROOT)
 impl = Tools(cfg)
 
-mcp = FastMCP("coding-agent-tools")
+mcp = FastMCP("omni-tools")
 
 
 # ---- Tools exposed to any MCP client (these are what the LLM sees) ----

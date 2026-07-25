@@ -14,7 +14,7 @@ ollama pull qwen3-coder:30b   # example: pulling the default model via Ollama
 ## Usage
 
 ```bash
-coding-agent "Add type hints to utils.py, then run the test suite" \
+omni "Add type hints to utils.py, then run the test suite" \
     --project-root ./myrepo
 ```
 
@@ -23,10 +23,10 @@ Equivalent: `python -m omni "..." --project-root ./myrepo`.
 Omit the task string to enter an interactive session instead:
 
 ```bash
-coding-agent --project-root ./myrepo
+omni --project-root ./myrepo
 ```
 
-Run `coding-agent --help` for the full option list.
+Run `omni --help` for the full option list.
 
 ## Features
 
@@ -116,9 +116,9 @@ reverse also holds: any additional MCP server — local (stdio) or remote
 (SSE / Streamable HTTP) — can be plugged into this agent, and its tools
 merge into the same list the model already sees —
 ```bash
-coding-agent --add-mcp-server "weather=python -m weather_mcp_server"     # local, stdio
-coding-agent --add-mcp-server "weather=https://example.com/mcp/sse"      # remote, SSE
-coding-agent "what's the forecast?"   # picked up automatically, every run from here on
+omni --add-mcp-server "weather=python -m weather_mcp_server"     # local, stdio
+omni --add-mcp-server "weather=https://example.com/mcp/sse"      # remote, SSE
+omni "what's the forecast?"   # picked up automatically, every run from here on
 ```
 A value after `name=` starting with `http://`/`https://` is treated as a
 remote server (SSE by default, append `,streamable_http` for that transport
