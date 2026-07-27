@@ -425,7 +425,20 @@ class CodingAgent:
                     return f"ERROR: {c['name']} raised: {e}"
 
             if runnable:
-                results = await asyncio.gather(*(_execute(c) for c in runnable))
+                # Only parallelize when every call this step is read-only
+                # (cfg.safe_tools) — nothing enforces ordering between
+                # concurrently-dispatched tool calls (a custom MCP server can
+                # be remote, and tools.py's handlers have no locking), so two
+                # calls that mutate the same state (e.g. write_file then
+                # edit_file on the file it just created) could race if run
+                # concurrently. Falling back to sequential execution for any
+                # step containing a write/shell/custom-tool call keeps the
+                # speed win for the common read-only case while removing
+                # that risk for anything that can actually mutate state.
+                if all(c["name"] in self.cfg.safe_tools for c in runnable):
+                    results = await asyncio.gather(*(_execute(c) for c in runnable))
+                else:
+                    results = [await _execute(c) for c in runnable]
                 for c, result in zip(runnable, results):
                     c["result"] = result
 

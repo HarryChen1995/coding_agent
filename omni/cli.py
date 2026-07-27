@@ -301,6 +301,17 @@ async def _interactive(cfg: AgentConfig, resume: Optional[str], session_name: Op
 
     if resume:
         _show_resumed_history(cfg.db_path, resume)
+        # Resolve --resume (which may be a --session-name, not a raw id) to
+        # the real DB id now rather than waiting for the first turn to set
+        # it — /compact and /delete use session_id directly, and a name
+        # doesn't match the DB's id column, so e.g. /compact would silently
+        # find "no messages" and report nothing to compact. Left unresolved
+        # (falls through to the raw value) if the name/id doesn't exist, so
+        # the existing "no session found" error still surfaces from
+        # agent.run() on the first turn.
+        resolved = agent.store.resolve_session_id(resume)
+        if resolved is not None:
+            session_id = resolved
 
     async with MCPToolClient(cfg.project_root, mcp_config_path=cfg.mcp_config_path or None,
                               extra_servers=cfg.mcp_servers or None,
