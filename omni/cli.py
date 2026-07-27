@@ -269,13 +269,23 @@ async def _interactive(cfg: AgentConfig, resume: Optional[str], session_name: Op
     to a plain input() loop if rich/prompt_toolkit aren't installed."""
     agent = CodingAgent(cfg)
     session_id = resume
+
+    def session_label() -> str:
+        # Prefer whatever human-chosen name identifies this session — the
+        # --session-name given for a new one, or the --resume value (which
+        # may itself be a name) — over the opaque hex id the DB assigns,
+        # so a name typed at startup never gets silently swapped for an id.
+        if resume:
+            return f"{resume} (resumed)"
+        return session_name or session_id or "(new)"
+
     commands = dict(_STATIC_COMMANDS)  # mutated in place below once MCP prompts are discovered
 
     try:
         from . import ui
         from prompt_toolkit import PromptSession
         from prompt_toolkit.patch_stdout import patch_stdout
-        ui.header(cfg.model, f"{resume} (resumed)" if resume else "(new)")
+        ui.header(cfg.model, session_label())
         prompt_session = PromptSession(completer=ui.SlashCommandCompleter(commands), complete_while_typing=True)
         # raw=True: pass Rich's ANSI-coded output straight through instead of
         # patch_stdout()'s default write() path, which sanitizes/escapes text
@@ -374,12 +384,12 @@ async def _interactive(cfg: AgentConfig, resume: Optional[str], session_name: Op
                     if selected and selected != cfg.model:
                         cfg.model = selected
                         typer.echo(f"Switched to model {cfg.model!r}.")
-                        _print_header(cfg, session_id or "(new)")
+                        _print_header(cfg, session_label())
                     continue
                 if task.startswith("/model "):
                     cfg.model = task[len("/model "):].strip()
                     typer.echo(f"Switched to model {cfg.model!r}.")
-                    _print_header(cfg, session_id or "(new)")
+                    _print_header(cfg, session_label())
                     continue
                 if task.startswith("/"):
                     prompt_name, _, rest = task[1:].partition(" ")
@@ -443,7 +453,7 @@ async def _interactive(cfg: AgentConfig, resume: Optional[str], session_name: Op
 
                 if agent.session_id != session_id:
                     session_id = agent.session_id
-                    _print_header(cfg, session_id)
+                    _print_header(cfg, session_label())
 
                 try:
                     from . import ui
