@@ -157,8 +157,17 @@ omni --resume utils-typing                 # resumes and prompts for input
 ```
 Type a task and press enter to run it; the conversation (and the MCP tool
 connection) stays alive between turns, so follow-ups don't pay the cost of
-re-parsing intent or re-spawning the tool server. Special inputs:
+re-parsing intent or re-spawning the tool server. Type `/` at the prompt to
+pop a completion menu of every available command — static ones below, plus
+one `/model <name>` entry per model the LLM server reports (best-effort;
+skipped if it doesn't expose `/v1/models`) and one `/server:prompt` entry per
+MCP prompt exposed by a connected server. Special inputs:
 - `/sessions` — list saved sessions without leaving the REPL
+- `/model` — list models available on the LLM server, marking the current one
+- `/model <name>` — switch the active model for the rest of the session
+- `/server:prompt [key=value ...]` — resolve an MCP prompt template (the
+  MCP "Prompts" capability — user-invocable templates a server exposes,
+  distinct from tools) exposed by a connected server, and run it as the task
 - `/delete <id-or-name>` — delete a saved session without leaving the REPL
 - `/compact` — summarize the current session's history down to the system
   prompt, original task, and most recent messages (`compact_keep_last`,

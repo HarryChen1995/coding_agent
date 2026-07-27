@@ -7,6 +7,7 @@ isn't installed, agent.py falls back to plain print() (see its import guard).
 import json
 import re
 
+from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.formatted_text import HTML
 from rich.console import Console
 from rich.markdown import Markdown
@@ -103,14 +104,58 @@ def banner(task: str, model: str):
     console.print(f"[dim]task:[/dim]  {task}\n")
 
 
-def interactive_banner(model: str, resumed: str = None):
-    console.print(Rule("[bold cyan]Coding Agent — interactive[/bold cyan]"))
-    console.print(f"[dim]model:[/dim] {model}")
-    if resumed:
-        console.print(f"[dim]resuming session:[/dim] {resumed}")
-    console.print("[dim]Type a task, /sessions to list saved sessions, /compact to summarize "
-                  "a long session's history, /exit to quit. "
-                  "Ctrl+C interrupts the current turn without leaving the session.[/dim]\n")
+_MASCOT_ART = """
+  ▄▄▄▄▄▄▄
+ █  ●  ● █
+ █    ▽   █
+  ▀▀▄▄▄▀▀
+  ╱ ╲╱ ╲╱
+""".strip("\n")
+
+
+def header(model: str, session_label: str):
+    """Box-framed header for interactive mode — model and session name are
+    re-printed via this same function (not just shown once at startup)
+    whenever either changes: a /model switch, or the session getting a real
+    id after the first turn."""
+    mascot = Text(_MASCOT_ART, style="bright_green")
+    info = Text()
+    info.append("model:   ", style="bold")
+    info.append(f"{model}\n")
+    info.append("session: ", style="bold")
+    info.append(f"{session_label}\n\n")
+    info.append("Type a task, or / for available commands\n", style="dim")
+    info.append("Ctrl+C interrupts the current turn", style="dim")
+
+    grid = Table.grid(padding=(0, 3))
+    grid.add_column()
+    grid.add_column()
+    grid.add_row(mascot, info)
+
+    console.print(Panel(grid, title="[bold]Omni Coder[/bold]", border_style="bright_green", expand=True))
+
+
+class SlashCommandCompleter(Completer):
+    """Pops a completion menu for '/' commands as soon as the input starts
+    with '/' — the static REPL commands (/exit, /sessions, /compact, ...)
+    plus, once connected, one entry per MCP prompt exposed by a connected
+    server (formatted as "/server:prompt").
+
+    `commands` is a {command_text: description} dict owned by the caller —
+    this class only reads it at completion time, so the caller can mutate
+    it in place (e.g. add prompt commands after the MCP client connects)
+    without recreating the completer or the PromptSession."""
+
+    def __init__(self, commands: dict):
+        self.commands = commands
+
+    def get_completions(self, document, complete_event):
+        text = document.text_before_cursor
+        if not text.startswith("/"):
+            return
+        for cmd, desc in self.commands.items():
+            if cmd.startswith(text):
+                yield Completion(cmd, start_position=-len(text), display_meta=desc)
 
 
 async def prompt_task_async(session) -> str:

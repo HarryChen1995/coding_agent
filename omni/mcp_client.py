@@ -234,6 +234,7 @@ class MCPToolClient:
         self._stack = AsyncExitStack()
         self._sessions: dict = {}     # server name -> ClientSession
         self._tool_owner: dict = {}   # exposed tool name -> (server name, real tool name)
+        self._prompt_owner: dict = {}  # exposed prompt name ("server:prompt") -> (server name, real prompt name)
         self._deferred_servers: set = set()  # server names registered with "defer": true
         self._deferred_tools: dict = {}       # exposed name -> schema, still hidden from the model
         self._revealed: set = set()           # exposed names of deferred tools search_tools has surfaced
@@ -426,6 +427,51 @@ class MCPToolClient:
             desc = self._deferred_tools[exposed_name]["function"].get("description", "").strip().splitlines()[:1]
             lines.append(f"- {exposed_name}: {desc[0] if desc else ''}")
         return "\n".join(lines)
+
+    async def list_prompts(self) -> dict:
+        """Prompt templates exposed by every connected MCP server — the MCP
+        "Prompts" capability, distinct from tools: user-invocable templates
+        rather than model-callable functions. Namespaced as
+        "<server_name>:<prompt_name>" (a colon, unlike tools' "__", so the
+        REPL can tell a `/server:prompt` command from a plain tool name).
+        Servers that don't implement prompts/list (the built-in tool server
+        doesn't declare any) are skipped rather than raising.
+
+        Returns {exposed_name: {"description": str, "arguments": [{"name", "description", "required"}, ...]}}.
+        """
+        prompts = {}
+        self._prompt_owner = {}
+        for server_name, session in self._sessions.items():
+            try:
+                result = await session.list_prompts()
+            except Exception:
+                continue
+            for p in result.prompts:
+                exposed_name = f"{server_name}:{p.name}"
+                self._prompt_owner[exposed_name] = (server_name, p.name)
+                prompts[exposed_name] = {
+                    "description": p.description or "",
+                    "arguments": [
+                        {"name": a.name, "description": a.description or "", "required": bool(a.required)}
+                        for a in (p.arguments or [])
+                    ],
+                }
+        return prompts
+
+    async def get_prompt(self, exposed_name: str, arguments: dict = None) -> str:
+        """Fetch a prompt template (by its "server:prompt" exposed name, from
+        list_prompts()) and flatten its rendered messages into plain text,
+        ready to feed to the model as if the user had typed it."""
+        if exposed_name not in self._prompt_owner:
+            raise ValueError(f"Unknown prompt {exposed_name!r} — run /prompts or check server name/spelling.")
+        server_name, real_name = self._prompt_owner[exposed_name]
+        session = self._sessions[server_name]
+        result = await session.get_prompt(real_name, arguments or None)
+        parts = []
+        for m in result.messages:
+            text = m.content.text if hasattr(m.content, "text") else str(m.content)
+            parts.append(text)
+        return "\n\n".join(parts)
 
     async def call_tool(self, name: str, args: dict) -> str:
         if name == _SEARCH_TOOLS_NAME:

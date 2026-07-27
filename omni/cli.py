@@ -35,6 +35,7 @@ Examples:
 
 import asyncio
 import os
+import shlex
 import signal
 from contextlib import nullcontext
 from typing import List, Optional
@@ -43,11 +44,21 @@ import typer
 
 from .agent import CodingAgent
 from .config import AgentConfig
+from .llm_client import LLMError, list_models
 from .mcp_client import (
     MCPToolClient, default_mcp_config_path, load_mcp_config,
     parse_mcp_server_specs, save_mcp_config,
 )
 from .session_store import SessionStore
+
+_STATIC_COMMANDS = {
+    "/exit": "leave the REPL",
+    "/quit": "leave the REPL",
+    "/sessions": "list saved sessions",
+    "/delete ": "delete a saved session — /delete <id-or-name>",
+    "/compact": "summarize this session's history down to a briefing",
+    "/model": "list models available on the LLM server (also populates /model <name> below)",
+}
 
 app = typer.Typer(add_completion=False, help="Coding agent (Qwen Coder or any OpenAI-compatible model)")
 
@@ -258,13 +269,14 @@ async def _interactive(cfg: AgentConfig, resume: Optional[str], session_name: Op
     to a plain input() loop if rich/prompt_toolkit aren't installed."""
     agent = CodingAgent(cfg)
     session_id = resume
+    commands = dict(_STATIC_COMMANDS)  # mutated in place below once MCP prompts are discovered
 
     try:
         from . import ui
         from prompt_toolkit import PromptSession
         from prompt_toolkit.patch_stdout import patch_stdout
-        ui.interactive_banner(cfg.model, resumed=resume)
-        prompt_session = PromptSession()
+        ui.header(cfg.model, f"{resume} (resumed)" if resume else "(new)")
+        prompt_session = PromptSession(completer=ui.SlashCommandCompleter(commands), complete_while_typing=True)
         # raw=True: pass Rich's ANSI-coded output straight through instead of
         # patch_stdout()'s default write() path, which sanitizes/escapes text
         # (it assumes plain text) and mangles embedded escape codes into
@@ -272,8 +284,8 @@ async def _interactive(cfg: AgentConfig, resume: Optional[str], session_name: Op
         stdout_cm = patch_stdout(raw=True)
     except ImportError:
         typer.echo(f"Interactive mode (model: {cfg.model}). Type a task, /sessions to list, "
-                   "/compact to summarize a long session's history, /exit to quit. "
-                   "Ctrl+C interrupts the current turn without leaving the session.\n")
+                   "/compact to summarize a long session's history, /model to list/switch models, "
+                   "/exit to quit. Ctrl+C interrupts the current turn without leaving the session.\n")
         prompt_session = None
         stdout_cm = nullcontext()
 
@@ -285,6 +297,23 @@ async def _interactive(cfg: AgentConfig, resume: Optional[str], session_name: Op
                               embedding_model=cfg.embedding_model or None,
                               llm_host=cfg.llm_host or None,
                               llm_api_key=cfg.llm_api_key or None) as client:
+        prompts = await client.list_prompts()
+        for name, info in prompts.items():
+            arg_hint = " ".join(
+                f"<{a['name']}>" if a["required"] else f"[{a['name']}]" for a in info["arguments"]
+            )
+            commands[f"/{name} "] = f"{info['description']} {arg_hint}".strip()
+
+        try:
+            # Best-effort: some LLM servers don't expose /v1/models. Register
+            # each model name as its own "/model <name>" completion so typing
+            # "/model " pops a pickable list — /model (bare) below refreshes
+            # this same set, in case models changed since startup.
+            for m in await list_models(cfg.llm_host or None, cfg.llm_api_key or None):
+                commands[f"/model {m}"] = "switch to this model"
+        except LLMError:
+            pass
+
         with stdout_cm:
             while True:
                 try:
@@ -317,6 +346,71 @@ async def _interactive(cfg: AgentConfig, resume: Optional[str], session_name: Op
                         typer.echo("Compacting history…")
                         typer.echo(await agent.compact_history(session_id))
                     continue
+                if task == "/model":
+                    try:
+                        models = await list_models(cfg.llm_host or None, cfg.llm_api_key or None)
+                    except LLMError as e:
+                        typer.echo(f"Error: {e}", err=True)
+                        continue
+                    for m in models:
+                        commands[f"/model {m}"] = "switch to this model"
+
+                    if prompt_session is None or not models:
+                        # No prompt_toolkit (plain input() fallback), or the
+                        # server returned no models: fall back to a static
+                        # list — pick with "/model <name>" instead.
+                        typer.echo(f"Current model: {cfg.model}")
+                        for m in models:
+                            typer.echo(f"  {'* ' if m == cfg.model else '  '}{m}")
+                        continue
+
+                    from prompt_toolkit.shortcuts import radiolist_dialog
+                    selected = await radiolist_dialog(
+                        title="Select model",
+                        text=f"Current: {cfg.model}  (↑/↓ to move, Enter to select, Esc to cancel)",
+                        values=[(m, m) for m in models],
+                        default=cfg.model if cfg.model in models else None,
+                    ).run_async()
+                    if selected and selected != cfg.model:
+                        cfg.model = selected
+                        typer.echo(f"Switched to model {cfg.model!r}.")
+                        _print_header(cfg, session_id or "(new)")
+                    continue
+                if task.startswith("/model "):
+                    cfg.model = task[len("/model "):].strip()
+                    typer.echo(f"Switched to model {cfg.model!r}.")
+                    _print_header(cfg, session_id or "(new)")
+                    continue
+                if task.startswith("/"):
+                    prompt_name, _, rest = task[1:].partition(" ")
+                    if prompt_name in prompts:
+                        arg_specs = prompts[prompt_name]["arguments"]
+                        try:
+                            values = shlex.split(rest)
+                        except ValueError as e:
+                            typer.echo(f"Error parsing arguments: {e}", err=True)
+                            continue
+                        if len(values) > len(arg_specs):
+                            names = ", ".join(a["name"] for a in arg_specs) or "(none)"
+                            typer.echo(
+                                f"Error: /{prompt_name} takes at most {len(arg_specs)} "
+                                f"argument(s): {names}", err=True,
+                            )
+                            continue
+                        # MCP prompt arguments are string-typed (dict[str, str]) — shlex.split
+                        # already yields plain strings, so no coercion is needed here.
+                        prompt_args = {a["name"]: v for a, v in zip(arg_specs, values)}
+                        missing = [a["name"] for a in arg_specs if a["required"] and a["name"] not in prompt_args]
+                        if missing:
+                            typer.echo(f"Error: /{prompt_name} missing required argument(s): "
+                                       f"{', '.join(missing)}", err=True)
+                            continue
+                        try:
+                            task = await client.get_prompt(prompt_name, prompt_args)
+                        except Exception as e:
+                            typer.echo(f"Error resolving prompt {prompt_name!r}: {e}", err=True)
+                            continue
+                        typer.echo(f"--- resolved /{prompt_name} ---\n{task}\n")
 
                 # Run the turn as a Task so Ctrl+C can cancel just this turn
                 # (via the SIGINT handler below) instead of killing the whole
@@ -347,7 +441,9 @@ async def _interactive(cfg: AgentConfig, resume: Optional[str], session_name: Op
                 finally:
                     signal.signal(signal.SIGINT, previous_sigint)
 
-                session_id = agent.session_id
+                if agent.session_id != session_id:
+                    session_id = agent.session_id
+                    _print_header(cfg, session_id)
 
                 try:
                     from . import ui
@@ -355,6 +451,18 @@ async def _interactive(cfg: AgentConfig, resume: Optional[str], session_name: Op
                 except ImportError:
                     typer.echo("\n=== RESULT ===")
                     typer.echo(result)
+
+
+def _print_header(cfg: AgentConfig, session_label: str):
+    """Re-print the header box — used at REPL startup and again whenever
+    the model or session identity changes (a /model switch, or the session
+    getting a real id after its first turn), so the box on screen never
+    goes stale."""
+    try:
+        from . import ui
+        ui.header(cfg.model, session_label)
+    except ImportError:
+        typer.echo(f"[model: {cfg.model}] [session: {session_label}]")
 
 
 def _show_resumed_history(db_path: str, resume: str):

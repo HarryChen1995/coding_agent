@@ -106,6 +106,38 @@ async def chat(
     return message
 
 
+async def list_models(base_url: str = None, api_key: str = None, timeout: float = 15.0) -> list:
+    """GET /v1/models (OpenAI-compatible) and return the list of model ids
+    the server has available. Used by the /model REPL command.
+
+    Raises LLMError on a non-2xx response, a connection failure, or an
+    unexpected response shape — same as chat()."""
+    url = f"{(base_url or DEFAULT_BASE_URL).rstrip('/')}/v1/models"
+    key = api_key or DEFAULT_API_KEY
+    headers = {"Authorization": f"Bearer {key}"} if key else {}
+
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.get(url, headers=headers)
+            resp.raise_for_status()
+            data = resp.json()
+    except httpx.HTTPStatusError as e:
+        body = e.response.text[:300]
+        raise LLMError(f"LLM API returned {e.response.status_code} listing models: {body}") from e
+    except httpx.RequestError as e:
+        raise LLMError(
+            f"Could not reach the LLM server at {url} ({e}). Is it running?"
+        ) from e
+
+    items = data.get("data")
+    if items is None:
+        raise LLMError(f"Unexpected response shape from LLM server (no 'data' key): {data}")
+    try:
+        return [item["id"] for item in items]
+    except (KeyError, TypeError) as e:
+        raise LLMError(f"Unexpected response shape from LLM models list (no 'id' key): {data}") from e
+
+
 async def embed(
     model: str,
     input: list,
