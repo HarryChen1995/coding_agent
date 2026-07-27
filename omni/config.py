@@ -40,6 +40,13 @@ class AgentConfig:
     shell_timeout_s: int = 30
     max_output_chars: int = 8000      # truncate tool output before feeding back to model
     context_char_budget: int = 200_000  # rough trim threshold (chars, not tokens)
+
+    # When context_char_budget is exceeded, the history is compacted: an LLM
+    # call summarizes everything except the system+task messages and the most
+    # recent `compact_keep_last` messages, which are kept verbatim. Falls back
+    # to the old drop-oldest trim if the summarization call itself fails.
+    compact_keep_last: int = 20
+    compact_model: str = ""           # empty = reuse `model` for compaction too
     log_path: str = "agent_run.log"
     db_path: str = "agent_sessions.db"  # SQLite file storing session/message history
 

@@ -271,7 +271,8 @@ async def _interactive(cfg: AgentConfig, resume: Optional[str], session_name: Op
         # literal garbage like "?[32m" on the screen.
         stdout_cm = patch_stdout(raw=True)
     except ImportError:
-        typer.echo(f"Interactive mode (model: {cfg.model}). Type a task, /sessions to list, /exit to quit. "
+        typer.echo(f"Interactive mode (model: {cfg.model}). Type a task, /sessions to list, "
+                   "/compact to summarize a long session's history, /exit to quit. "
                    "Ctrl+C interrupts the current turn without leaving the session.\n")
         prompt_session = None
         stdout_cm = nullcontext()
@@ -308,6 +309,13 @@ async def _interactive(cfg: AgentConfig, resume: Optional[str], session_name: Op
                             session_id = None  # the session we were resuming just got deleted
                     else:
                         typer.echo(f"No session found with id or name {target!r}.", err=True)
+                    continue
+                if task == "/compact":
+                    if session_id is None:
+                        typer.echo("No active session yet — run a task first.")
+                    else:
+                        typer.echo("Compacting history…")
+                        typer.echo(await agent.compact_history(session_id))
                     continue
 
                 # Run the turn as a Task so Ctrl+C can cancel just this turn

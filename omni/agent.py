@@ -140,7 +140,8 @@ def _recover_text_tool_calls(content: str, tool_names: set) -> list:
 def _trim_history(messages: list, budget: int) -> list:
     """Keep the system + user task message plus the most recent turns
     within a rough character budget. Crude but effective without pulling
-    in a tokenizer dependency."""
+    in a tokenizer dependency. Used as a fallback if LLM-based compaction
+    (_compact_messages) itself fails."""
     total = sum(len(str(m.get("content", ""))) for m in messages)
     if total <= budget:
         return messages
@@ -149,6 +150,74 @@ def _trim_history(messages: list, budget: int) -> list:
         removed = tail.pop(0)
         total -= len(str(removed.get("content", "")))
     return head + tail
+
+
+def _render_for_summary(m: dict, max_len: int = 800) -> str:
+    role = m.get("role", "")
+    if role == "assistant" and m.get("tool_calls"):
+        calls = ", ".join(
+            f"{c['function']['name']}({c['function'].get('arguments', '')})"
+            for c in m["tool_calls"]
+        )
+        return f"assistant: called {calls}"
+    content = (m.get("content") or "").strip()
+    if len(content) > max_len:
+        content = content[:max_len] + "…"
+    return f"{role}: {content}"
+
+
+_COMPACT_PROMPT = (
+    "You are compacting an in-progress coding-agent session so it can continue "
+    "with a smaller context window. Summarize the conversation excerpt below into "
+    "a compact briefing for the model that will keep working: what task is being "
+    "done, what files were read/written and how, what decisions or constraints "
+    "were established, what worked, what failed, and any state the continuation "
+    "needs to know. Be concrete (file paths, function names) and terse — this "
+    "replaces the raw messages, so omit anything not needed to keep working "
+    "correctly. Do not add commentary about the summarization itself."
+)
+
+
+async def _compact_messages(messages: list, model: str, cfg: AgentConfig, logger) -> list:
+    """Replace the middle of a long conversation with an LLM-written summary,
+    keeping the system + task messages and the most recent `cfg.compact_keep_last`
+    messages verbatim. Returns `messages` unchanged if there's nothing worth
+    compacting (short history, or no middle to summarize). Falls back to the
+    crude drop-oldest trim (_trim_history) if the summarization call fails."""
+    keep_last = cfg.compact_keep_last
+    if len(messages) <= 2 + keep_last:
+        return messages
+
+    head, middle, tail = messages[:2], messages[2:-keep_last], messages[-keep_last:]
+    if not middle:
+        return messages
+
+    transcript = "\n".join(_render_for_summary(m) for m in middle)
+    try:
+        reply = await chat(
+            model=model,
+            messages=[
+                {"role": "system", "content": _COMPACT_PROMPT},
+                {"role": "user", "content": transcript},
+            ],
+            base_url=cfg.llm_host, api_key=cfg.llm_api_key,
+        )
+        summary = (reply.get("content") or "").strip()
+    except Exception as e:
+        logger.info(f"compaction failed, falling back to drop-oldest trim: {e}")
+        return _trim_history(messages, cfg.context_char_budget)
+
+    if not summary:
+        return _trim_history(messages, cfg.context_char_budget)
+
+    summary_msg = {
+        "role": "system",
+        "content": f"# Compacted history ({len(middle)} earlier messages)\n{summary}",
+    }
+    logger.info(f"compacted {len(middle)} messages into a {len(summary)}-char summary")
+    if _HAS_UI:
+        ui.compacted(len(middle), len(summary))
+    return head + [summary_msg] + tail
 
 
 class CodingAgent:
@@ -183,6 +252,21 @@ class CodingAgent:
                         spinner.update(f"[bold yellow]Thinking… (retry {attempt}/{self.cfg.max_retries})[/bold yellow]")
                     await asyncio.sleep(1)
         raise RuntimeError(f"Model call failed after {self.cfg.max_retries} attempts: {last_err}")
+
+    async def compact_history(self, session_id: str) -> str:
+        """Manually compact a session's stored history (the /compact REPL
+        command). Unlike the automatic compaction inside _run_loop, this runs
+        regardless of the char budget and persists the result back to the
+        session store, so it takes effect immediately and survives resume.
+        Returns a short human-readable message describing what happened."""
+        messages = self.store.load_messages(session_id)
+        compacted = await _compact_messages(
+            messages, self.cfg.compact_model or self.cfg.model, self.cfg, self.logger,
+        )
+        if len(compacted) >= len(messages):
+            return "Nothing to compact — history is already short."
+        self.store.replace_messages(session_id, compacted)
+        return f"Compacted {len(messages)} messages down to {len(compacted)}."
 
     async def run(self, task: str = "", resume_session_id: str = None, client: MCPToolClient = None,
                   session_name: str = None, show_banner: bool = True) -> str:
@@ -275,7 +359,11 @@ class CodingAgent:
             persisted += 1
 
         for step in range(1, self.cfg.max_steps + 1):
-            messages = _trim_history(messages, self.cfg.context_char_budget)
+            total_chars = sum(len(str(m.get("content", ""))) for m in messages)
+            if total_chars > self.cfg.context_char_budget:
+                messages = await _compact_messages(
+                    messages, self.cfg.compact_model or self.cfg.model, self.cfg, self.logger,
+                )
             msg = await self._call_model(messages, tool_schemas)
 
             tool_calls = msg.get("tool_calls")
@@ -299,45 +387,70 @@ class CodingAgent:
                 self.store.finish_session(session_id, "done", final)
                 return final
 
+            # Parse every call's arguments up front. The whole step (all
+            # tool calls the model made this turn — often several at once)
+            # is displayed as a single unit once execution finishes, instead
+            # of announcing + reporting each call separately, and the calls
+            # themselves run concurrently rather than one after another.
+            calls = []
             for call in tool_calls:
                 name = call["function"]["name"]
-                args = call["function"]["arguments"]
+                raw_args = call["function"]["arguments"]
+                args = raw_args
                 if isinstance(args, str):
                     try:
                         args = json.loads(args)
                     except json.JSONDecodeError:
-                        result = f"ERROR: model sent malformed arguments: {args!r}"
-                        messages.append({"role": "tool", "content": result})
-                        self.store.append_message(session_id, persisted, messages[-1])
-                        persisted += 1
-                        self.logger.info(f"[step {step}] {name} -> BAD ARGS")
-                        continue
+                        args = None
+                calls.append({"name": name, "args": args, "raw": raw_args})
 
-                if _HAS_UI:
-                    ui.step_header(step, name, args)
-                else:
-                    print(f"\nstep {step} -> {name}({args})")
+            for c in calls:
+                if c["args"] is None:
+                    c["result"] = f"ERROR: model sent malformed arguments: {c['raw']!r}"
 
-                if not await _approve(name, args, self.cfg, client, self.force_approval):
-                    result = "Denied by human reviewer. Choose a different approach."
-                else:
-                    try:
-                        result = await client.call_tool(name, args)
-                        if name == "search_tools" and not str(result).startswith("ERROR"):
-                            # Deferred-loading MCP tools just got revealed — refresh
-                            # the schemas handed to the model so it can call them.
-                            tool_schemas = await client.list_llm_tools()
-                            tool_names = {t["function"]["name"] for t in tool_schemas}
-                    except Exception as e:
-                        result = f"ERROR: {name} raised: {e}"
+            runnable = [c for c in calls if c["args"] is not None]
 
-                ok = not str(result).startswith("ERROR") and result != "Denied by human reviewer. Choose a different approach."
-                if _HAS_UI:
-                    ui.tool_result(step, name, args, str(result), ok)
-                else:
-                    print(f"[step {step}] {name}({args}) -> {str(result)[:200]}")
-                self.logger.info(f"[step {step}] {name}({args}) -> {str(result)[:500]}")
-                messages.append({"role": "tool", "content": str(result)})
+            # Approval prompts are interactive, so they're resolved one at a
+            # time in call order; the tool calls that get approved then run
+            # concurrently below instead of one after another.
+            for c in runnable:
+                c["approved"] = await _approve(c["name"], c["args"], self.cfg, client, self.force_approval)
+
+            async def _execute(c):
+                if not c["approved"]:
+                    return "Denied by human reviewer. Choose a different approach."
+                try:
+                    return await client.call_tool(c["name"], c["args"])
+                except Exception as e:
+                    return f"ERROR: {c['name']} raised: {e}"
+
+            if runnable:
+                results = await asyncio.gather(*(_execute(c) for c in runnable))
+                for c, result in zip(runnable, results):
+                    c["result"] = result
+
+                if any(c["name"] == "search_tools" and not str(c["result"]).startswith("ERROR") for c in runnable):
+                    # Deferred-loading MCP tools just got revealed — refresh
+                    # the schemas handed to the model so it can call them.
+                    tool_schemas = await client.list_llm_tools()
+                    tool_names = {t["function"]["name"] for t in tool_schemas}
+
+            for c in calls:
+                c["ok"] = (
+                    c["args"] is not None
+                    and not str(c["result"]).startswith("ERROR")
+                    and c["result"] != "Denied by human reviewer. Choose a different approach."
+                )
+
+            if _HAS_UI:
+                ui.step_display(step, calls)
+            else:
+                for c in calls:
+                    print(f"[step {step}] {c['name']}({c['args']}) -> {str(c['result'])[:200]}")
+
+            for c in calls:
+                self.logger.info(f"[step {step}] {c['name']}({c['args']}) -> {str(c['result'])[:500]}")
+                messages.append({"role": "tool", "content": str(c["result"])})
                 self.store.append_message(session_id, persisted, messages[-1])
                 persisted += 1
 

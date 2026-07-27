@@ -16,6 +16,7 @@ from rich.syntax import Syntax
 from rich.rule import Rule
 from rich.table import Table
 from rich.text import Text
+from rich.tree import Tree
 
 console = Console()
 
@@ -107,7 +108,8 @@ def interactive_banner(model: str, resumed: str = None):
     console.print(f"[dim]model:[/dim] {model}")
     if resumed:
         console.print(f"[dim]resuming session:[/dim] {resumed}")
-    console.print("[dim]Type a task, /sessions to list saved sessions, /exit to quit. "
+    console.print("[dim]Type a task, /sessions to list saved sessions, /compact to summarize "
+                  "a long session's history, /exit to quit. "
                   "Ctrl+C interrupts the current turn without leaving the session.[/dim]\n")
 
 
@@ -195,10 +197,11 @@ def _format_args(args: dict, max_len: int = 60) -> str:
     return ", ".join(parts)
 
 
-def step_header(step: int, name: str, args: dict):
+def _call_str(name: str, args) -> str:
+    if args is None:
+        return f"{name}(<malformed arguments>)"
     color = _CATEGORY_COLOR[_category(name)]
-    call_str = f"{name}({_format_args(args)})"
-    console.print(f"\n[bold cyan]step {step}[/bold cyan] → [{color}]{call_str}[/{color}]")
+    return f"[{color}]{name}({_format_args(args)})[/{color}]"
 
 
 async def request_approval(name: str, args: dict, client) -> bool:
@@ -234,7 +237,9 @@ async def request_approval(name: str, args: dict, client) -> bool:
 _DIFF_TOOLS = {"edit_file", "write_file"}
 
 
-def tool_result(step: int, name: str, args: dict, result: str, ok: bool):
+def _result_line(name: str, args, result: str, ok: bool) -> tuple:
+    """Returns (summary_line, diff_body_or_None) for one tool call's result —
+    shared by the single-call and multi-call (tree) display paths."""
     icon = "[green]✓[/green]" if ok else "[red]✗[/red]"
     path = args.get("path", "") if isinstance(args, dict) else ""
     diff_body = None
@@ -250,11 +255,35 @@ def tool_result(step: int, name: str, args: dict, result: str, ok: bool):
         summary = f"{path}  +{added} -{removed}"
     else:
         summary = result.splitlines()[0] if result else ""
-    console.print(f"  {icon} {summary[:160]}")
-    # For writes/edits, show the diff body under the summary line — with a
-    # line number gutter and red/green highlighting for removed/added lines.
-    if diff_body is not None:
-        console.print(_render_diff(diff_body))
+    return f"{icon} {summary[:160]}", diff_body
+
+
+def step_display(step: int, calls: list):
+    """`calls` is an ordered list of dicts with name, args (None if the
+    model sent malformed JSON), result, ok — every tool call the model made
+    this step, already executed. A single tool call prints as one compact
+    block; several tool calls in the same step (the model ran them in
+    parallel) print as a rich.Tree, so the step number shows once with all
+    of its calls and their results nested under it, instead of repeating
+    "step N" once per call."""
+    if len(calls) == 1:
+        c = calls[0]
+        console.print(f"\n[bold cyan]step {step}[/bold cyan] → {_call_str(c['name'], c['args'])}")
+        line, diff_body = _result_line(c["name"], c["args"], str(c["result"]), c["ok"])
+        console.print(f"  {line}")
+        if diff_body is not None:
+            console.print(_render_diff(diff_body))
+        return
+
+    tree = Tree(f"[bold cyan]step {step}[/bold cyan]")
+    for c in calls:
+        branch = tree.add(_call_str(c["name"], c["args"]))
+        line, diff_body = _result_line(c["name"], c["args"], str(c["result"]), c["ok"])
+        branch.add(line)
+        if diff_body is not None:
+            branch.add(_render_diff(diff_body))
+    console.print()
+    console.print(tree)
 
 
 def final_result(text: str):
@@ -310,6 +339,13 @@ def interrupted():
     console.print(
         "\n[yellow]⏹ Interrupted — back at the prompt. Progress up to the last "
         "completed step was saved; keep chatting or ask the agent to continue.[/yellow]"
+    )
+
+
+def compacted(num_messages: int, summary_len: int):
+    console.print(
+        f"[dim]⚙ compacted {num_messages} earlier messages into a "
+        f"{summary_len}-char summary to stay within the context budget[/dim]"
     )
 
 

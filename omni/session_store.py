@@ -112,6 +112,26 @@ class SessionStore:
             )
             conn.execute("UPDATE sessions SET updated_at = ? WHERE id = ?", (now, session_id))
 
+    def replace_messages(self, session_id: str, messages: list) -> None:
+        """Overwrite a session's full message history (used by /compact):
+        deletes the existing rows and re-inserts `messages` with fresh
+        sequence numbers, so a later load_messages/resume sees the
+        compacted version instead of the original."""
+        now = _now()
+        with _connect(self.db_path) as conn:
+            conn.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
+            for seq, message in enumerate(messages):
+                tool_calls = message.get("tool_calls")
+                conn.execute(
+                    "INSERT INTO messages (session_id, seq, role, content, tool_calls, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        session_id, seq, message.get("role", ""), message.get("content"),
+                        json.dumps(tool_calls) if tool_calls else None, now,
+                    ),
+                )
+            conn.execute("UPDATE sessions SET updated_at = ? WHERE id = ?", (now, session_id))
+
     def finish_session(self, session_id: str, status: str, summary: str) -> None:
         with _connect(self.db_path) as conn:
             conn.execute(

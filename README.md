@@ -160,6 +160,13 @@ connection) stays alive between turns, so follow-ups don't pay the cost of
 re-parsing intent or re-spawning the tool server. Special inputs:
 - `/sessions` — list saved sessions without leaving the REPL
 - `/delete <id-or-name>` — delete a saved session without leaving the REPL
+- `/compact` — summarize the current session's history down to the system
+  prompt, original task, and most recent messages (`compact_keep_last`,
+  default 20), replacing everything older with an LLM-written briefing.
+  Persists immediately, so the shrunk history is what future turns (and
+  `--resume`) load. History is also compacted automatically mid-run
+  whenever it exceeds `context_char_budget`; that automatic pass only
+  affects the model's working context and doesn't rewrite saved history.
 - **Ctrl-C while a turn is running** — interrupts just that turn (cancels
   whatever model or tool call is in flight) and drops you back at the
   prompt; the session and MCP connection stay alive, so you can keep
