@@ -1,6 +1,6 @@
-# Omni Coder
+# 🐙 Omni Coder
 
-## Setup
+## ⚙️ Setup
 ```bash
 ollama pull qwen3-coder:30b   # example: pulling the default model via Ollama
 pip install -e .
@@ -11,7 +11,7 @@ chat-completions endpoint (`/api/v1/chat/completions`) directly over HTTP via
 OpenAI-compatible server/gateway (e.g. Open WebUI) — point `--llm-host` at
 whichever one you're running.
 
-## Run
+## ▶️ Run
 ```bash
 omni "Add type hints to utils.py, then run the test suite" \
     --project-root ./myrepo
@@ -27,7 +27,7 @@ kept in sync with the code.
 Omit the task string to drop into an interactive session instead of a
 one-shot run — see [Session management](#session-management) below.
 
-## What makes this "production grade" vs. the first draft
+## 🏭 What makes this "production grade" vs. the first draft
 
 | Concern | First draft | This version |
 |---|---|---|
@@ -45,7 +45,7 @@ one-shot run — see [Session management](#session-management) below.
 | Long-term memory | Every session starts blank | `save_memory` tool appends durable notes (conventions, gotchas, preferences) to a project-local `agent_memory.md`, auto-injected into the system prompt at the start of every new session |
 | Interactive robustness | Ctrl+C anywhere killed the whole process | Ctrl+C during a running turn cancels just that turn (via a scoped SIGINT handler + `asyncio.Task.cancel()`) — the session and MCP connection stay alive so you can keep going |
 
-## Still recommended before real production use
+## ⚠️ Still recommended before real production use
 
 1. **Run it in a container**, not on your host. The path-scope check and shell
    denylist reduce risk but are not a substitute for OS-level isolation —
@@ -64,7 +64,7 @@ one-shot run — see [Session management](#session-management) below.
    larger quant or `qwen2.5-coder:32b` (dense, less agentic-tuned but very
    reliable on straightforward edits).
 
-## Intent parsing
+## 🧭 Intent parsing
 
 Before the agent takes any action, the raw task string is parsed by the model
 (in strict JSON mode, no tools) into structured intent:
@@ -93,7 +93,7 @@ follow from this automatically:
 Skip it with `--skip-intent-parsing` if you want lower latency on simple
 tasks, or point it at a smaller/faster model with `--intent-model`.
 
-## Project memory
+## 🧠 Project memory
 
 The agent can remember durable facts about a project across separate runs —
 conventions, gotchas, stated preferences — via a `save_memory` tool it calls
@@ -115,7 +115,7 @@ so it doesn't warrant a confirmation prompt like `write_file`/`edit_file` do.
 Resumed sessions keep whatever memory was baked in when they originally
 started rather than re-reading the file live — kept intentionally simple.
 
-## Session management
+## 💾 Session management
 
 Every message in the conversation — system, user, assistant, tool results —
 is persisted to a SQLite file (`agent_sessions.db` by default, `--db-path` to
@@ -163,11 +163,14 @@ one `/model <name>` entry per model the LLM server reports (best-effort;
 skipped if it doesn't expose `/v1/models`) and one `/server:prompt` entry per
 MCP prompt exposed by a connected server. Special inputs:
 - `/sessions` — list saved sessions without leaving the REPL
-- `/model` — list models available on the LLM server, marking the current one
-- `/model <name>` — switch the active model for the rest of the session
-- `/server:prompt [key=value ...]` — resolve an MCP prompt template (the
+- `/model` — opens an interactive picker (↑/↓ to move, Enter to select, Esc to
+  cancel) of models available on the LLM server, defaulting to the current one
+- `/model <name>` — switch the active model directly, without the picker
+- `/server:prompt [param1] [param2] ...` — resolve an MCP prompt template (the
   MCP "Prompts" capability — user-invocable templates a server exposes,
-  distinct from tools) exposed by a connected server, and run it as the task
+  distinct from tools) exposed by a connected server, and run it as the task.
+  Arguments are positional, matched in order against the prompt's declared
+  argument list (quote a value to include spaces, e.g. `/docs:search "foo bar"`)
 - `/delete <id-or-name>` — delete a saved session without leaving the REPL
 - `/compact` — summarize the current session's history down to the system
   prompt, original task, and most recent messages (`compact_keep_last`,
@@ -187,7 +190,7 @@ A spinner shows while waiting on the model (initial intent parsing and every
 turn), including a live retry counter if a call fails transiently and gets
 retried — so a slow or cold-loading model doesn't look like it's hung.
 
-## Terminal UI
+## 🎨 Terminal UI
 
 `ui.py` renders everything through [rich](https://github.com/Textualize/rich):
 banner + parsed intent as a panel, each step with a colored ✓/✗, approval
@@ -209,7 +212,7 @@ If `rich` isn't installed, `agent.py` and `cli.py` both detect the missing
 import and fall back to plain `print()` — nothing breaks, it just looks
 like the original CLI.
 
-## Tools as an MCP server
+## 🔌 Tools as an MCP server
 
 The tools live behind a real MCP server (`mcp_server.py`), not inline in the
 agent. The agent is an MCP *client* — it spawns the server as a subprocess
@@ -296,7 +299,7 @@ What this buys you:
 The agent loop is `async` end-to-end (an MCP session requires it); `cli.py`
 runs it via `asyncio.run()`.
 
-## Custom MCP servers
+## 🧩 Custom MCP servers
 
 The built-in tools aren't the ceiling — any MCP server, local (stdio) or
 remote (SSE / Streamable HTTP), can be added, and its tools show up to the
@@ -368,7 +371,7 @@ global registry.
   support auth headers — use `--mcp-config` with a JSON file when the
   remote server needs them.
 
-## Deferred tool loading & search_tools
+## 🔍 Deferred tool loading & search_tools
 
 A custom MCP server with a lot of tools (or ones rarely needed) can be
 registered with `"defer": true` instead of loading eagerly. Its tools are
@@ -431,7 +434,7 @@ omni --embedding-model mxbai-embed-large "task"  # use a remote OpenAI-compatibl
   error) falls back to keyword matching for that call rather than erroring
   out — `search_tools` still answers, just less precisely.
 
-## Files
+## 📁 Files
 All modules live under `omni/`:
 - `config.py` — all tunables in one dataclass
 - `intent.py` — parses the freeform task into structured intent (task_type, target_files, constraints, risk_level)

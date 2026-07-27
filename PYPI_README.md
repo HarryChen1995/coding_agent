@@ -1,17 +1,17 @@
-# Omni Coder
+# 🐙 Omni Coder
 
 An AI coding agent that plans, edits, and tests code by driving Qwen Coder
 (or any OpenAI-compatible model) through a scoped set of file and shell
 tools, with human approval on every write, edit, or shell command.
 
-## Install
+## 📦 Install
 
 ```bash
 pip install omni-coder
 ollama pull qwen3-coder:30b   # example: pulling the default model via Ollama
 ```
 
-## Usage
+## ▶️ Usage
 
 ```bash
 omni "Add type hints to utils.py, then run the test suite" \
@@ -28,7 +28,7 @@ omni --project-root ./myrepo
 
 Run `omni --help` for the full option list.
 
-## Features
+## ✨ Features
 
 - **Structured intent parsing** — the raw task is classified (bug fix,
   feature, refactor, risk level, target files) before any action is taken,
@@ -67,7 +67,7 @@ Run `omni --help` for the full option list.
   on-device embeddings (`nomic-local`, default) or a remote OpenAI-compatible
   embedding model, with automatic keyword-match fallback.
 
-## Architecture
+## 🏗️ Architecture
 
 Tools are served over the Model Context Protocol (MCP), not called
 in-process — the agent is an MCP *client* that talks to a tool server over
@@ -134,18 +134,18 @@ embeddings, or point `--embedding-model` at a remote one instead;
 `--embedding-model ""` falls back to plain keyword matching). See the full
 README for details.
 
-## Configuration
+## ⚙️ Configuration
 
 Point at any OpenAI-compatible host with `--llm-host` or the
 `LLM_HOST` env var. If it sits behind an authenticated proxy, set
 `LLM_API_KEY` as an environment variable rather than a CLI flag so the
 key doesn't end up in shell history.
 
-## Links
+## 🔗 Links
 
 Source, full documentation, and issue tracker:
 https://github.com/HarryChen1995/omni-coder
 
-## License
+## 📄 License
 
 MIT
