@@ -139,7 +139,9 @@ README for details.
 Point at any OpenAI-compatible host with `--llm-host` or the
 `LLM_HOST` env var. If it sits behind an authenticated proxy, set
 `LLM_API_KEY` as an environment variable rather than a CLI flag so the
-key doesn't end up in shell history.
+key doesn't end up in shell history. Seeing repeated retries in the
+terminal? That's usually a client-side timeout, not a dead server — raise
+it with `--llm-timeout <seconds>` (default `300`).
 
 ## 🔗 Links
 

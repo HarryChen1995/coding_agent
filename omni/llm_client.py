@@ -59,7 +59,7 @@ async def chat(
     format: str = None,
     base_url: str = None,
     api_key: str = None,
-    timeout: float = 120.0,
+    timeout: float = 300.0,
 ) -> dict:
     """POST /v1/chat/completions (OpenAI-compatible) with stream=false and
     return the `message` dict.

@@ -458,3 +458,9 @@ in your shell history:
 export LLM_API_KEY="sk-..."
 omni "task" --project-root ./repo --llm-host http://your-host:8080
 ```
+
+If you keep seeing "Thinking… (retry N/max_retries)" in the terminal, that's
+usually a client-side request timeout, not the server being down — a large
+local model can easily take longer than the default to respond to an
+agentic tool-calling turn. Raise it with `--llm-timeout <seconds>` (default
+`300`; applies to chat, intent parsing, and history compaction alike).

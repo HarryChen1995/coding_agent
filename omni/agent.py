@@ -200,7 +200,7 @@ async def _compact_messages(messages: list, model: str, cfg: AgentConfig, logger
                 {"role": "system", "content": _COMPACT_PROMPT},
                 {"role": "user", "content": transcript},
             ],
-            base_url=cfg.llm_host, api_key=cfg.llm_api_key,
+            base_url=cfg.llm_host, api_key=cfg.llm_api_key, timeout=cfg.llm_timeout_s,
         )
         summary = (reply.get("content") or "").strip()
     except Exception as e:
@@ -238,7 +238,8 @@ class CodingAgent:
             for attempt in range(1, self.cfg.max_retries + 1):
                 try:
                     return await chat(model=self.cfg.model, messages=messages, tools=tool_schemas,
-                                       base_url=self.cfg.llm_host, api_key=self.cfg.llm_api_key)
+                                       base_url=self.cfg.llm_host, api_key=self.cfg.llm_api_key,
+                                       timeout=self.cfg.llm_timeout_s)
                 except LLMError as e:
                     last_err = e
                     self.logger.info(f"model call failed (attempt {attempt}): {e}")
@@ -334,7 +335,8 @@ class CodingAgent:
             spinner = ui.thinking("Parsing intent…") if _HAS_UI else nullcontext()
             with spinner:
                 intent = await extract_intent(task, intent_model, self.cfg.max_retries, self.logger,
-                                               base_url=self.cfg.llm_host, api_key=self.cfg.llm_api_key)
+                                               base_url=self.cfg.llm_host, api_key=self.cfg.llm_api_key,
+                                               timeout=self.cfg.llm_timeout_s)
 
             existing = {f: await client.file_exists(f) for f in intent.target_files}
             context_block = intent.as_context_block(existing)

@@ -80,6 +80,12 @@ def main(
              "(defaults to $LLM_API_KEY — prefer the env var over this flag "
              "so the key doesn't end up in your shell history).",
     ),
+    llm_timeout: float = typer.Option(
+        AgentConfig.llm_timeout_s, "--llm-timeout",
+        help="Per-request timeout (seconds) for calls to the LLM server (chat, intent parsing, "
+             "history compaction). Raise this if you're seeing repeated retries with a slow/large "
+             "local model — that's usually a client-side timeout, not the server being unreachable.",
+    ),
     max_steps: int = typer.Option(100, "--max-steps", help="Hard cap on agent loop iterations"),
     auto_approve: bool = typer.Option(
         False, "--auto-approve",
@@ -221,6 +227,7 @@ def main(
         model=model,
         llm_host=llm_host or "",
         llm_api_key=llm_api_key or "",
+        llm_timeout_s=llm_timeout,
         project_root=project_root,
         max_steps=max_steps,
         auto_approve=auto_approve,

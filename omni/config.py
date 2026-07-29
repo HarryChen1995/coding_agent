@@ -37,6 +37,7 @@ class AgentConfig:
     parse_intent: bool = True
     intent_model: str = ""            # empty = reuse `model` for intent parsing too
     max_retries: int = 3              # retries per model call on bad/malformed output
+    llm_timeout_s: float = 300.0      # per-request timeout for chat/intent/compaction calls to the LLM server
     shell_timeout_s: int = 30
     max_output_chars: int = 8000      # truncate tool output before feeding back to model
     context_char_budget: int = 200_000  # rough trim threshold (chars, not tokens)

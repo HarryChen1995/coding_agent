@@ -102,7 +102,8 @@ def _coerce(data: dict) -> Intent:
     )
 
 
-async def extract_intent(task: str, model: str, max_retries: int = 3, logger=None, base_url: str = None, api_key: str = None) -> Intent:
+async def extract_intent(task: str, model: str, max_retries: int = 3, logger=None, base_url: str = None,
+                          api_key: str = None, timeout: float = 300.0) -> Intent:
     """Ask the model to parse `task` into structured intent. On repeated
     failure, returns a low-confidence Intent(task_type='other') rather than
     raising — callers should treat `confident=False` as a signal to fall
@@ -115,7 +116,8 @@ async def extract_intent(task: str, model: str, max_retries: int = 3, logger=Non
     last_err = None
     for attempt in range(1, max_retries + 1):
         try:
-            message = await chat(model=model, messages=messages, format="json", base_url=base_url, api_key=api_key)
+            message = await chat(model=model, messages=messages, format="json", base_url=base_url,
+                                  api_key=api_key, timeout=timeout)
             content = message["content"]
             data = json.loads(_strip_code_fence(content))
             intent = _coerce(data)
