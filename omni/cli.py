@@ -100,6 +100,21 @@ def main(
     intent_model: Optional[str] = typer.Option(
         None, "--intent-model", help="Smaller/faster model to use just for intent parsing (defaults to --model)",
     ),
+    context_char_budget: int = typer.Option(
+        AgentConfig.context_char_budget, "--context-char-budget",
+        help="Rough character budget (not tokens) for the running conversation. Once exceeded, "
+             "history is compacted — an LLM call summarizes everything except the system+task "
+             "messages and the most recent --compact-keep-last messages.",
+    ),
+    compact_keep_last: int = typer.Option(
+        AgentConfig.compact_keep_last, "--compact-keep-last",
+        help="How many of the most recent messages to keep verbatim (not summarized) when "
+             "history is compacted, either automatically (--context-char-budget) or via /compact.",
+    ),
+    compact_model: Optional[str] = typer.Option(
+        None, "--compact-model",
+        help="Smaller/faster model to use just for history-compaction summaries (defaults to --model)",
+    ),
     embedding_model: Optional[str] = typer.Option(
         None, "--embedding-model",
         help="Embedding backend for search_tools semantic ranking against deferred MCP tool "
@@ -234,6 +249,9 @@ def main(
         log_path=log_path,
         parse_intent=not skip_intent_parsing,
         intent_model=intent_model or "",
+        context_char_budget=context_char_budget,
+        compact_keep_last=compact_keep_last,
+        compact_model=compact_model or "",
         db_path=db_path,
         mcp_config_path=effective_mcp_config_path,
         mcp_servers=extra_mcp_servers,

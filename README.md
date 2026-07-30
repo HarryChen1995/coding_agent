@@ -36,7 +36,7 @@ one-shot run — see [Session management](#session-management) below.
 | Shell safety | Ran anything, unbounded | Denylist for destructive patterns (`rm -rf /`, `sudo`, fork bombs, etc.), timeout, output truncation |
 | Human oversight | None | Write/edit/shell calls pause for approval unless the tool is in `safe_tools` or `auto_approve=True` |
 | Model reliability | Assumed clean tool-call JSON | Retries with backoff on API errors; malformed tool-call args are caught and reported back to the model instead of crashing |
-| Context window | Unbounded growth | Char-budget trimming keeps the running conversation under `context_char_budget` |
+| Context window | Unbounded growth | Once the conversation exceeds `--context-char-budget` (default 200k chars), it's compacted via an LLM-written summary instead of growing forever |
 | Observability | `print()` only | Structured log file (`agent_run.log`) recording every model call, tool call, args, and result |
 | Config | Hardcoded constants | `AgentConfig` dataclass — one place to tune model, project root, limits, policy |
 | Sessions | Each run started from a blank conversation | Every message is persisted to SQLite (`session_store.py`); resume by id or name, or run interactively |
@@ -173,12 +173,15 @@ MCP prompt exposed by a connected server. Special inputs:
   argument list (quote a value to include spaces, e.g. `/docs:search "foo bar"`)
 - `/delete <id-or-name>` — delete a saved session without leaving the REPL
 - `/compact` — summarize the current session's history down to the system
-  prompt, original task, and most recent messages (`compact_keep_last`,
+  prompt, original task, and most recent messages (`--compact-keep-last`,
   default 20), replacing everything older with an LLM-written briefing.
   Persists immediately, so the shrunk history is what future turns (and
   `--resume`) load. History is also compacted automatically mid-run
-  whenever it exceeds `context_char_budget`; that automatic pass only
-  affects the model's working context and doesn't rewrite saved history.
+  whenever it exceeds `--context-char-budget` (default 200,000 characters,
+  not tokens — a rough proxy); that automatic pass only affects the model's
+  working context and doesn't rewrite saved history. Use `--compact-model`
+  to run the summarization call itself through a smaller/faster model
+  than `--model` (same idea as `--intent-model`).
 - **Ctrl-C while a turn is running** — interrupts just that turn (cancels
   whatever model or tool call is in flight) and drops you back at the
   prompt; the session and MCP connection stay alive, so you can keep

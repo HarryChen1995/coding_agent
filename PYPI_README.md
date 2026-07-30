@@ -40,7 +40,13 @@ Run `omni --help` for the full option list.
 - **Interactive mode** — drop into a REPL that keeps the model connection
   and tool session alive across turns. Ctrl-C during a running turn cancels
   just that turn instead of killing the session — you land back at the
-  prompt and can keep going.
+  prompt and can keep going. Type `/` for a completion menu of every
+  command, including `/model` (switch models) and `/server:prompt` (run an
+  MCP prompt template).
+- **Automatic context compaction** — once the running conversation exceeds
+  `--context-char-budget` (default 200k chars), older messages are replaced
+  with an LLM-written summary instead of growing forever or being silently
+  dropped. Trigger it manually anytime with `/compact`.
 - **Human-in-the-loop approval** — every write, edit, or shell command
   shows a diff or command preview before you confirm (diffs render with
   line numbers and red/green highlighting), unless explicitly marked safe
