@@ -389,7 +389,6 @@ async def _interactive(cfg: AgentConfig, resume: Optional[str], session_name: Op
                     if session_id is None:
                         typer.echo("No active session yet — run a task first.")
                     else:
-                        typer.echo("Compacting history…")
                         typer.echo(await agent.compact_history(session_id))
                     continue
                 if task == "/model":

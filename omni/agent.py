@@ -193,15 +193,17 @@ async def _compact_messages(messages: list, model: str, cfg: AgentConfig, logger
         return messages
 
     transcript = "\n".join(_render_for_summary(m) for m in middle)
+    spinner = ui.thinking(f"Compacting {len(middle)} messages…") if _HAS_UI else nullcontext()
     try:
-        reply = await chat(
-            model=model,
-            messages=[
-                {"role": "system", "content": _COMPACT_PROMPT},
-                {"role": "user", "content": transcript},
-            ],
-            base_url=cfg.llm_host, api_key=cfg.llm_api_key, timeout=cfg.llm_timeout_s,
-        )
+        with spinner:
+            reply = await chat(
+                model=model,
+                messages=[
+                    {"role": "system", "content": _COMPACT_PROMPT},
+                    {"role": "user", "content": transcript},
+                ],
+                base_url=cfg.llm_host, api_key=cfg.llm_api_key, timeout=cfg.llm_timeout_s,
+            )
         summary = (reply.get("content") or "").strip()
     except Exception as e:
         logger.info(f"compaction failed, falling back to drop-oldest trim: {e}")
