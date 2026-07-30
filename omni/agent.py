@@ -10,6 +10,8 @@ import json
 import logging
 import os
 import re
+import signal
+import time
 from contextlib import nullcontext
 
 from .llm_client import chat, LLMError
@@ -193,6 +195,7 @@ async def _compact_messages(messages: list, model: str, cfg: AgentConfig, logger
         return messages
 
     transcript = "\n".join(_render_for_summary(m) for m in middle)
+    start = time.monotonic()
     spinner = ui.thinking(f"Compacting {len(middle)} messages…") if _HAS_UI else nullcontext()
     try:
         with spinner:
@@ -212,13 +215,16 @@ async def _compact_messages(messages: list, model: str, cfg: AgentConfig, logger
     if not summary:
         return _trim_history(messages, cfg.context_char_budget)
 
+    elapsed = time.monotonic() - start
     summary_msg = {
         "role": "system",
         "content": f"# Compacted history ({len(middle)} earlier messages)\n{summary}",
     }
-    logger.info(f"compacted {len(middle)} messages into a {len(summary)}-char summary")
+    logger.info(f"compacted {len(middle)} messages into a {len(summary)}-char summary ({elapsed:.1f}s)")
     if _HAS_UI:
-        ui.compacted(len(middle), len(summary))
+        ui.compacted(len(middle), len(summary), elapsed)
+    else:
+        print(f"Compacted {len(middle)} messages into a {len(summary)}-char summary ({elapsed:.1f}s)")
     return head + [summary_msg] + tail
 
 
@@ -235,13 +241,20 @@ class CodingAgent:
         5xx, malformed tool-call output — small local models occasionally
         emit broken JSON)."""
         last_err = None
+        start = time.monotonic()
         spinner = ui.thinking() if _HAS_UI else nullcontext()
         with spinner:
             for attempt in range(1, self.cfg.max_retries + 1):
                 try:
-                    return await chat(model=self.cfg.model, messages=messages, tools=tool_schemas,
-                                       base_url=self.cfg.llm_host, api_key=self.cfg.llm_api_key,
-                                       timeout=self.cfg.llm_timeout_s)
+                    result = await chat(model=self.cfg.model, messages=messages, tools=tool_schemas,
+                                         base_url=self.cfg.llm_host, api_key=self.cfg.llm_api_key,
+                                         timeout=self.cfg.llm_timeout_s)
+                    elapsed = time.monotonic() - start
+                    if _HAS_UI:
+                        ui.elapsed_note("Responded", elapsed)
+                    else:
+                        print(f"Responded ({elapsed:.1f}s)")
+                    return result
                 except LLMError as e:
                     last_err = e
                     self.logger.info(f"model call failed (attempt {attempt}): {e}")
@@ -421,28 +434,69 @@ class CodingAgent:
                 c["approved"] = await _approve(c["name"], c["args"], self.cfg, client, self.force_approval)
 
             async def _execute(c):
-                if not c["approved"]:
-                    return "Denied by human reviewer. Choose a different approach."
+                start = time.monotonic()
                 try:
+                    if not c["approved"]:
+                        return "Denied by human reviewer. Choose a different approach."
                     return await client.call_tool(c["name"], c["args"])
                 except Exception as e:
                     return f"ERROR: {c['name']} raised: {e}"
+                finally:
+                    c["duration"] = time.monotonic() - start
 
             if runnable:
-                # Only parallelize when every call this step is read-only
-                # (cfg.safe_tools) — nothing enforces ordering between
-                # concurrently-dispatched tool calls (a custom MCP server can
-                # be remote, and tools.py's handlers have no locking), so two
-                # calls that mutate the same state (e.g. write_file then
-                # edit_file on the file it just created) could race if run
-                # concurrently. Falling back to sequential execution for any
-                # step containing a write/shell/custom-tool call keeps the
-                # speed win for the common read-only case while removing
-                # that risk for anything that can actually mutate state.
-                if all(c["name"] in self.cfg.safe_tools for c in runnable):
-                    results = await asyncio.gather(*(_execute(c) for c in runnable))
-                else:
-                    results = [await _execute(c) for c in runnable]
+                names = ", ".join(c["name"] for c in runnable)
+                spinner = ui.thinking(f"Running {names}…") if _HAS_UI else nullcontext()
+                with spinner:
+                    # Ctrl+C here cancels only the tool call(s) currently
+                    # running, not the whole turn — swap in a handler that
+                    # targets just this step's task(s), restoring whatever
+                    # was active before (cli.py's "cancel the whole turn"
+                    # handler, during every other phase) once done.
+                    if all(c["name"] in self.cfg.safe_tools for c in runnable):
+                        # Every call is read-only, so they all run at once —
+                        # Ctrl+C cancels whichever of them haven't finished yet.
+                        tasks = [asyncio.ensure_future(_execute(c)) for c in runnable]
+                        previous_sigint = signal.signal(
+                            signal.SIGINT, lambda *_: [t.cancel() for t in tasks if not t.done()]
+                        )
+                        try:
+                            raw_results = await asyncio.gather(*tasks, return_exceptions=True)
+                        finally:
+                            signal.signal(signal.SIGINT, previous_sigint)
+                    else:
+                        # Sequential (see the safe_tools check above for why):
+                        # only the one call actually in flight is cancelable
+                        # — each task is created and awaited in turn, not all
+                        # up front. Once one is cancelled, the rest of this
+                        # step's calls are skipped rather than run anyway —
+                        # Ctrl+C means "stop", not "skip just this one and
+                        # keep mutating state with whatever comes next."
+                        current = {}
+                        previous_sigint = signal.signal(
+                            signal.SIGINT,
+                            lambda *_: current["task"].cancel() if current.get("task") and not current["task"].done() else None,
+                        )
+                        try:
+                            raw_results = []
+                            cancelled = False
+                            for c in runnable:
+                                if cancelled:
+                                    raw_results.append(asyncio.CancelledError())
+                                    continue
+                                current["task"] = asyncio.ensure_future(_execute(c))
+                                try:
+                                    raw_results.append(await current["task"])
+                                except asyncio.CancelledError:
+                                    raw_results.append(asyncio.CancelledError())
+                                    cancelled = True
+                        finally:
+                            signal.signal(signal.SIGINT, previous_sigint)
+
+                results = [
+                    "ERROR: cancelled by user (Ctrl+C)." if isinstance(r, asyncio.CancelledError) else r
+                    for r in raw_results
+                ]
                 for c, result in zip(runnable, results):
                     c["result"] = result
 

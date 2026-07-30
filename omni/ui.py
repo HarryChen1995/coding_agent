@@ -6,6 +6,7 @@ isn't installed, agent.py falls back to plain print() (see its import guard).
 
 import json
 import re
+import zlib
 
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.formatted_text import HTML
@@ -179,6 +180,13 @@ def thinking(label: str = "Thinking…"):
     return console.status(f"[bold cyan]{label}[/bold cyan]", spinner="dots")
 
 
+def elapsed_note(label: str, seconds: float):
+    """Small dim line noting how long an operation took — printed once it
+    finishes (after a `thinking()` spinner closes, or a step's tool calls
+    are done executing), not a live-updating counter."""
+    console.print(f"[dim]  {label} ({seconds:.1f}s)[/dim]")
+
+
 def intent_panel(intent, existing: dict):
     risk_color = {"low": "green", "medium": "yellow", "high": "red"}.get(intent.risk_level, "white")
     files_line = "none specified"
@@ -230,6 +238,35 @@ def _category(name: str) -> str:
     return "other"
 
 
+_TOOL_EMOJI = {
+    "read_file": "🔍", "write_file": "📝", "edit_file": "✏️",
+    "list_dir": "📁", "glob_files": "🗂️", "search_files": "🔎",
+    "run_shell": "💻",
+    "git_diff": "📊", "git_status": "📋", "git_log": "📜", "git_show": "👁️",
+    "git_branch": "🌿", "git_fetch": "📥", "git_add": "➕", "git_commit": "💾",
+    "git_pull": "⬇️", "git_push": "⬆️",
+    "save_memory": "🧠", "search_tools": "🧰",
+}
+_DEFAULT_TOOL_EMOJI = "🧩"  # fallback for an unnamespaced tool this map doesn't know
+
+# Custom MCP server tools are exposed as "<server_name>__<tool_name>" (see
+# mcp_client.py's list_llm_tools). Rather than one blanket icon for every
+# custom tool, pick one deterministically per *server* name (a stable hash,
+# not Python's randomized-per-process hash()) — so all of one server's tools
+# share an icon, different servers get different ones, and it's the same
+# icon across runs, not just within one session.
+_SERVER_EMOJI_PALETTE = ["🔧", "🔌", "🛰️", "📡", "🧪", "🎛️", "🧬", "🪄"]
+
+
+def _emoji_for(name: str) -> str:
+    if name in _TOOL_EMOJI:
+        return _TOOL_EMOJI[name]
+    if "__" in name:
+        server = name.split("__", 1)[0]
+        return _SERVER_EMOJI_PALETTE[zlib.crc32(server.encode()) % len(_SERVER_EMOJI_PALETTE)]
+    return _DEFAULT_TOOL_EMOJI
+
+
 def _format_args(args: dict, max_len: int = 60) -> str:
     parts = []
     for k, v in args.items():
@@ -243,38 +280,40 @@ def _format_args(args: dict, max_len: int = 60) -> str:
 
 
 def _call_str(name: str, args) -> str:
+    emoji = _emoji_for(name)
     if args is None:
-        return f"{name}(<malformed arguments>)"
+        return f"{emoji} {name}(<malformed arguments>)"
     color = _CATEGORY_COLOR[_category(name)]
-    return f"[{color}]{name}({_format_args(args)})[/{color}]"
+    return f"{emoji} [{color}]{name}({_format_args(args)})[/{color}]"
 
 
 async def request_approval(name: str, args: dict, client) -> bool:
     """Show a rich preview (diff / content / command) and ask for confirmation.
     `client` is an MCPToolClient — previews go through the same MCP server
     the real tool calls do, just via the read-only _preview_* tools."""
+    emoji = _emoji_for(name)
     if name == "edit_file":
         path = args.get("path", "")
         ok, preview = await client.preview_edit(path, args.get("old_str", ""), args.get("new_str", ""))
         if not ok:
-            console.print(Panel(f"[red]{preview}[/red]", title=f"edit_file: {path}", border_style="red"))
+            console.print(Panel(f"[red]{preview}[/red]", title=f"{emoji} edit_file: {path}", border_style="red"))
             return False
         added, removed = _diff_stats(preview)
-        title = f"edit_file: {path}  [green]+{added}[/green] [red]-{removed}[/red]"
+        title = f"{emoji} edit_file: {path}  [green]+{added}[/green] [red]-{removed}[/red]"
         console.print(Panel(_render_diff(preview), title=title, border_style="yellow"))
     elif name == "write_file":
         path = args.get("path", "")
         is_new, preview = await client.preview_write(path, args.get("content", ""), args.get("overwrite", False))
         added, removed = _diff_stats(preview)
         label = "new" if is_new else "overwrite"
-        title = f"write_file ({label}): {path}  [green]+{added}[/green] [red]-{removed}[/red]"
+        title = f"{emoji} write_file ({label}): {path}  [green]+{added}[/green] [red]-{removed}[/red]"
         console.print(Panel(_render_diff(preview), title=title, border_style="green" if is_new else "yellow"))
     elif name == "run_shell":
         cmd = args.get("command", "")
         console.print(Panel(Syntax(cmd, "bash", theme="ansi_dark"),
-                             title="run_shell", border_style="magenta"))
+                             title=f"{emoji} run_shell", border_style="magenta"))
     else:
-        console.print(Panel(json.dumps(args, indent=2), title=name, border_style="white"))
+        console.print(Panel(json.dumps(args, indent=2), title=f"{emoji} {name}", border_style="white"))
 
     return Confirm.ask("[bold]Proceed?[/bold]", default=False)
 
@@ -282,7 +321,7 @@ async def request_approval(name: str, args: dict, client) -> bool:
 _DIFF_TOOLS = {"edit_file", "write_file"}
 
 
-def _result_line(name: str, args, result: str, ok: bool) -> tuple:
+def _result_line(name: str, args, result: str, ok: bool, duration: float = None) -> tuple:
     """Returns (summary_line, diff_body_or_None) for one tool call's result —
     shared by the single-call and multi-call (tree) display paths."""
     icon = "[green]✓[/green]" if ok else "[red]✗[/red]"
@@ -300,21 +339,23 @@ def _result_line(name: str, args, result: str, ok: bool) -> tuple:
         summary = f"{path}  +{added} -{removed}"
     else:
         summary = result.splitlines()[0] if result else ""
-    return f"{icon} {summary[:160]}", diff_body
+    time_suffix = f"  [dim]({duration:.1f}s)[/dim]" if duration is not None else ""
+    return f"{icon} {summary[:160]}{time_suffix}", diff_body
 
 
 def step_display(step: int, calls: list):
     """`calls` is an ordered list of dicts with name, args (None if the
-    model sent malformed JSON), result, ok — every tool call the model made
-    this step, already executed. A single tool call prints as one compact
-    block; several tool calls in the same step (the model ran them in
-    parallel) print as a rich.Tree, so the step number shows once with all
-    of its calls and their results nested under it, instead of repeating
+    model sent malformed JSON), result, ok, duration (seconds, absent for
+    calls that never executed) — every tool call the model made this step,
+    already executed. A single tool call prints as one compact block;
+    several tool calls in the same step (the model ran them in parallel)
+    print as a rich.Tree, so the step number shows once with all of its
+    calls and their results nested under it, instead of repeating
     "step N" once per call."""
     if len(calls) == 1:
         c = calls[0]
         console.print(f"\n[bold cyan]step {step}[/bold cyan] → {_call_str(c['name'], c['args'])}")
-        line, diff_body = _result_line(c["name"], c["args"], str(c["result"]), c["ok"])
+        line, diff_body = _result_line(c["name"], c["args"], str(c["result"]), c["ok"], c.get("duration"))
         console.print(f"  {line}")
         if diff_body is not None:
             console.print(_render_diff(diff_body))
@@ -323,7 +364,7 @@ def step_display(step: int, calls: list):
     tree = Tree(f"[bold cyan]step {step}[/bold cyan]")
     for c in calls:
         branch = tree.add(_call_str(c["name"], c["args"]))
-        line, diff_body = _result_line(c["name"], c["args"], str(c["result"]), c["ok"])
+        line, diff_body = _result_line(c["name"], c["args"], str(c["result"]), c["ok"], c.get("duration"))
         branch.add(line)
         if diff_body is not None:
             branch.add(_render_diff(diff_body))
@@ -387,10 +428,10 @@ def interrupted():
     )
 
 
-def compacted(num_messages: int, summary_len: int):
+def compacted(num_messages: int, summary_len: int, elapsed: float):
     console.print(
         f"[dim]⚙ compacted {num_messages} earlier messages into a "
-        f"{summary_len}-char summary to stay within the context budget[/dim]"
+        f"{summary_len}-char summary ({elapsed:.1f}s) to stay within the context budget[/dim]"
     )
 
 
