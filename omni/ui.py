@@ -4,8 +4,10 @@ Nothing here affects agent logic — it's purely how things are shown. If rich
 isn't installed, agent.py falls back to plain print() (see its import guard).
 """
 
+import asyncio
 import json
 import re
+import time
 import zlib
 
 from prompt_toolkit.completion import Completer, Completion
@@ -173,11 +175,58 @@ async def prompt_task_async(session) -> str:
     return await session.prompt_async(HTML("<ansigreen><b>❯</b></ansigreen> "))
 
 
+class _TickingSpinner:
+    """`with`-usable spinner (same contract as the plain rich Status this
+    replaces: sync `__enter__`/`__exit__`, a `.update(label)` method) that
+    also keeps a live "(N.Ns)" elapsed-time suffix ticking on its own via a
+    background asyncio task, instead of only reporting elapsed time once
+    after the operation finishes (see elapsed_note/compacted for that).
+    Must be entered from within a running event loop — true at every call
+    site here, all inside `async def` functions.
+
+    `.update(label)` keeps the exact prior contract: `label` is the full
+    markup string to show (callers style it themselves, e.g. a differently
+    colored retry message) — this class only appends the ticking suffix,
+    it doesn't impose its own styling on updates."""
+
+    def __init__(self, label: str, interval: float = 0.15):
+        self._label = label
+        self._interval = interval
+        self._status = console.status(label, spinner="dots")
+        self._task = None
+        self._start = None
+
+    def update(self, label: str):
+        self._label = label
+
+    async def _tick(self):
+        try:
+            while True:
+                await asyncio.sleep(self._interval)
+                self._status.update(f"{self._label} ({time.monotonic() - self._start:.1f}s)")
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            pass  # cosmetic ticker — never let it surface an error over the real work
+
+    def __enter__(self):
+        self._start = time.monotonic()
+        self._status.__enter__()
+        self._task = asyncio.ensure_future(self._tick())
+        return self
+
+    def __exit__(self, *exc_info):
+        if self._task is not None:
+            self._task.cancel()
+        return self._status.__exit__(*exc_info)
+
+
 def thinking(label: str = "Thinking…"):
-    """Spinner shown while waiting on a model call. Safe to use around an
-    `await` — rich's status display refreshes on its own thread, so it
-    doesn't block the event loop."""
-    return console.status(f"[bold cyan]{label}[/bold cyan]", spinner="dots")
+    """Spinner shown while waiting on a model call or tool execution. Safe
+    to use around an `await` — rich's status display refreshes on its own
+    thread, so it doesn't block the event loop. Ticks a live elapsed-time
+    counter for as long as it's open (see _TickingSpinner)."""
+    return _TickingSpinner(f"[bold cyan]{label}[/bold cyan]")
 
 
 def elapsed_note(label: str, seconds: float):
