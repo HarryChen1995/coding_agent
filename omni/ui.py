@@ -175,6 +175,20 @@ async def prompt_task_async(session) -> str:
     return await session.prompt_async(HTML("<ansigreen><b>❯</b></ansigreen> "))
 
 
+def _format_elapsed(seconds: float) -> str:
+    """Sub-minute durations stay decisecond-precise (e.g. "3.2s"); once a
+    call runs a minute or longer, switch to whole-second m/s (or h/m/s past
+    an hour) so a long wait reads as a duration, not a large decimal."""
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    total = int(seconds)
+    hours, rem = divmod(total, 3600)
+    minutes, secs = divmod(rem, 60)
+    if hours:
+        return f"{hours}h {minutes:02d}m {secs:02d}s"
+    return f"{minutes}m {secs:02d}s"
+
+
 class _TickingSpinner:
     """`with`-usable spinner (same contract as the plain rich Status this
     replaces: sync `__enter__`/`__exit__`, a `.update(label)` method) that
@@ -203,7 +217,7 @@ class _TickingSpinner:
         try:
             while True:
                 await asyncio.sleep(self._interval)
-                self._status.update(f"{self._label} ({time.monotonic() - self._start:.1f}s)")
+                self._status.update(f"{self._label} ({_format_elapsed(time.monotonic() - self._start)})")
         except asyncio.CancelledError:
             pass
         except Exception:
@@ -233,7 +247,7 @@ def elapsed_note(label: str, seconds: float):
     """Small dim line noting how long an operation took — printed once it
     finishes (after a `thinking()` spinner closes, or a step's tool calls
     are done executing), not a live-updating counter."""
-    console.print(f"[dim]  {label} ({seconds:.1f}s)[/dim]")
+    console.print(f"[dim]  {label} ({_format_elapsed(seconds)})[/dim]")
 
 
 def intent_panel(intent, existing: dict):
@@ -388,7 +402,7 @@ def _result_line(name: str, args, result: str, ok: bool, duration: float = None)
         summary = f"{path}  +{added} -{removed}"
     else:
         summary = result.splitlines()[0] if result else ""
-    time_suffix = f"  [dim]({duration:.1f}s)[/dim]" if duration is not None else ""
+    time_suffix = f"  [dim]({_format_elapsed(duration)})[/dim]" if duration is not None else ""
     return f"{icon} {summary[:160]}{time_suffix}", diff_body
 
 
@@ -480,7 +494,7 @@ def interrupted():
 def compacted(num_messages: int, summary_len: int, elapsed: float):
     console.print(
         f"[dim]⚙ compacted {num_messages} earlier messages into a "
-        f"{summary_len}-char summary ({elapsed:.1f}s) to stay within the context budget[/dim]"
+        f"{summary_len}-char summary ({_format_elapsed(elapsed)}) to stay within the context budget[/dim]"
     )
 
 

@@ -139,6 +139,20 @@ def _recover_text_tool_calls(content: str, tool_names: set) -> list:
     return calls
 
 
+def _format_elapsed(seconds: float) -> str:
+    """Plain-text mirror of ui._format_elapsed, for the no-rich print()
+    fallback path — duplicated rather than imported since this module must
+    keep working when ui.py (and rich) isn't installed at all."""
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    total = int(seconds)
+    hours, rem = divmod(total, 3600)
+    minutes, secs = divmod(rem, 60)
+    if hours:
+        return f"{hours}h {minutes:02d}m {secs:02d}s"
+    return f"{minutes}m {secs:02d}s"
+
+
 def _trim_history(messages: list, budget: int) -> list:
     """Keep the system + user task message plus the most recent turns
     within a rough character budget. Crude but effective without pulling
@@ -224,7 +238,7 @@ async def _compact_messages(messages: list, model: str, cfg: AgentConfig, logger
     if _HAS_UI:
         ui.compacted(len(middle), len(summary), elapsed)
     else:
-        print(f"Compacted {len(middle)} messages into a {len(summary)}-char summary ({elapsed:.1f}s)")
+        print(f"Compacted {len(middle)} messages into a {len(summary)}-char summary ({_format_elapsed(elapsed)})")
     return head + [summary_msg] + tail
 
 
@@ -253,7 +267,7 @@ class CodingAgent:
                     if _HAS_UI:
                         ui.elapsed_note("Responded", elapsed)
                     else:
-                        print(f"Responded ({elapsed:.1f}s)")
+                        print(f"Responded ({_format_elapsed(elapsed)})")
                     return result
                 except LLMError as e:
                     last_err = e
