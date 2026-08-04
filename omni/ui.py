@@ -484,6 +484,36 @@ def sessions_table(sessions: list):
     console.print(table)
 
 
+def mcp_status(entries: list):
+    """Table for the /mcp REPL command — one row per configured MCP server
+    (built-in + custom), whether or not it actually connected. `entries` is
+    MCPToolClient.server_status()'s output."""
+    table = Table(title="MCP Servers", expand=False)
+    table.add_column("")
+    table.add_column("server", style="bold")
+    table.add_column("status")
+    table.add_column("tools", justify="right")
+    table.add_column("target / error", style="dim")
+
+    for e in entries:
+        name = e["name"]
+        if e["deferred"]:
+            name += " [dim](defer)[/dim]"
+        if e["connected"]:
+            icon = "[green]✅[/green]"
+            status = f"[green]connected {_format_elapsed(e['connected_for'])}[/green]"
+            tools = str(e["tool_count"])
+            detail = e["target"]
+        else:
+            icon = "[red]❌[/red]"
+            status = "[red]failed[/red]"
+            tools = "-"
+            detail = f"[red]{e['error']}[/red]" if e["error"] else "-"
+        table.add_row(icon, name, status, tools, detail)
+
+    console.print(table)
+
+
 def interrupted():
     console.print(
         "\n[yellow]⏹ Interrupted — back at the prompt. Progress up to the last "

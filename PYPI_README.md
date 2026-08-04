@@ -66,7 +66,9 @@ Run `omni --help` for the full option list.
   (stdio) or remote (SSE / Streamable HTTP), and its tools merge into the
   model's toolset automatically, no code changes required. Register one
   permanently (`--add-mcp-server`, available on every future run) or add
-  one per run (`--mcp-server`/`--mcp-config`).
+  one per run (`--mcp-server`/`--mcp-config`). One server failing to
+  connect doesn't take down the session — check `/mcp` for live ✅/❌
+  status per server, and `--mcp-log-path` for their stderr output.
 - **Deferred tool loading + semantic search_tools** — register a custom MCP
   server with `--defer` and its tools stay out of the model's context until
   a synthesized `search_tools` tool loads matching ones on demand, ranked by

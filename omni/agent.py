@@ -348,7 +348,8 @@ class CodingAgent:
                                       extra_servers=self.cfg.mcp_servers or None,
                                       embedding_model=self.cfg.embedding_model or None,
                                       llm_host=self.cfg.llm_host or None,
-                                      llm_api_key=self.cfg.llm_api_key or None) as owned_client:
+                                      llm_api_key=self.cfg.llm_api_key or None,
+                                      mcp_log_path=self.cfg.mcp_log_path) as owned_client:
                 return await self._run_loop(task, session_id, messages, persisted, resuming, owned_client)
         except Exception as e:
             self.store.finish_session(session_id, "error", str(e))

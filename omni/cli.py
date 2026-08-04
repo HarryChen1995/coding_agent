@@ -58,6 +58,7 @@ _STATIC_COMMANDS = {
     "/delete ": "delete a saved session — /delete <id-or-name>",
     "/compact": "summarize this session's history down to a briefing",
     "/model": "list models available on the LLM server (also populates /model <name> below)",
+    "/mcp": "show connected MCP servers, connect time, and tool counts",
 }
 
 app = typer.Typer(add_completion=False, help="Coding agent (Qwen Coder or any OpenAI-compatible model)")
@@ -93,6 +94,11 @@ def main(
              "already-isolated environment (container/VM). Overridden if intent parsing flags the task high-risk.",
     ),
     log_path: str = typer.Option("agent_run.log", "--log-path", help="Where to write the structured run log"),
+    mcp_log_path: str = typer.Option(
+        AgentConfig.mcp_log_path, "--mcp-log-path",
+        help="Where stderr from every stdio-transport MCP server (built-in + custom) is redirected, "
+             "instead of interleaving raw subprocess output with the terminal UI.",
+    ),
     skip_intent_parsing: bool = typer.Option(
         False, "--skip-intent-parsing",
         help="Skip the upfront structured-intent parse and go straight into the agent loop.",
@@ -247,6 +253,7 @@ def main(
         max_steps=max_steps,
         auto_approve=auto_approve,
         log_path=log_path,
+        mcp_log_path=mcp_log_path,
         parse_intent=not skip_intent_parsing,
         intent_model=intent_model or "",
         context_char_budget=context_char_budget,
@@ -342,7 +349,13 @@ async def _interactive(cfg: AgentConfig, resume: Optional[str], session_name: Op
                               extra_servers=cfg.mcp_servers or None,
                               embedding_model=cfg.embedding_model or None,
                               llm_host=cfg.llm_host or None,
-                              llm_api_key=cfg.llm_api_key or None) as client:
+                              llm_api_key=cfg.llm_api_key or None,
+                              mcp_log_path=cfg.mcp_log_path) as client:
+        await client.list_llm_tools()  # populate tool counts for /mcp before any task runs
+        for e in client.server_status():
+            if not e["connected"]:
+                typer.echo(f"Warning: MCP server {e['name']!r} failed to connect: {e['error']}", err=True)
+
         prompts = await client.list_prompts()
         for name, info in prompts.items():
             arg_hint = " ".join(
@@ -390,6 +403,9 @@ async def _interactive(cfg: AgentConfig, resume: Optional[str], session_name: Op
                         typer.echo("No active session yet — run a task first.")
                     else:
                         typer.echo(await agent.compact_history(session_id))
+                    continue
+                if task == "/mcp":
+                    _print_mcp_status(client.server_status())
                     continue
                 if task == "/model":
                     try:
@@ -548,6 +564,20 @@ def _print_sessions(sessions: list):
     except ImportError:
         for s in sessions:
             typer.echo(f"{s['id']}  {s.get('name') or '-'}  [{s['status']}]  {s['updated_at']}  {s['task'][:70]}")
+
+
+def _print_mcp_status(entries: list):
+    try:
+        from . import ui
+        ui.mcp_status(entries)
+    except ImportError:
+        from .agent import _format_elapsed
+        for e in entries:
+            if e["connected"]:
+                typer.echo(f"[OK]   {e['name']}  connected {_format_elapsed(e['connected_for'])}  "
+                           f"{e['tool_count']} tools  {e['target']}")
+            else:
+                typer.echo(f"[FAIL] {e['name']}  {e['error']}", err=True)
 
 
 if __name__ == "__main__":

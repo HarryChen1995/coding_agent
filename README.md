@@ -37,7 +37,7 @@ one-shot run — see [Session management](#session-management) below.
 | Human oversight | None | Write/edit/shell calls pause for approval unless the tool is in `safe_tools` or `auto_approve=True` |
 | Model reliability | Assumed clean tool-call JSON | Retries with backoff on API errors; malformed tool-call args are caught and reported back to the model instead of crashing |
 | Context window | Unbounded growth | Once the conversation exceeds `--context-char-budget` (default 200k chars), it's compacted via an LLM-written summary instead of growing forever |
-| Observability | `print()` only | Structured log file (`agent_run.log`) recording every model call, tool call, args, and result |
+| Observability | `print()` only | Structured log file (`agent_run.log`) recording every model call, tool call, args, and result — plus a separate `mcp_servers.log` for MCP server stderr, and a `/mcp` command showing live connection status |
 | Config | Hardcoded constants | `AgentConfig` dataclass — one place to tune model, project root, limits, policy |
 | Sessions | Each run started from a blank conversation | Every message is persisted to SQLite (`session_store.py`); resume by id or name, or run interactively |
 | Codebase search | `grep` piped through a subprocess | Pure-Python `search_files` (regex + glob filter, skips `.git`/`node_modules`/etc.) and a `glob_files` tool for pattern-based file discovery |
@@ -163,6 +163,11 @@ one `/model <name>` entry per model the LLM server reports (best-effort;
 skipped if it doesn't expose `/v1/models`) and one `/server:prompt` entry per
 MCP prompt exposed by a connected server. Special inputs:
 - `/sessions` — list saved sessions without leaving the REPL
+- `/mcp` — table of every configured MCP server (built-in + custom), each
+  with a ✅/❌ connected status, how long it's been connected, tool count,
+  and command/URL (or the connection error, for a ❌ one). A custom server
+  failing to connect no longer aborts startup — it just shows ❌ here
+  instead of the whole session refusing to start
 - `/model` — opens an interactive picker (↑/↓ to move, Enter to select, Esc to
   cancel) of models available on the LLM server, defaulting to the current one
 - `/model <name>` — switch the active model directly, without the picker
@@ -311,6 +316,16 @@ other wiring needed. They're namespaced as `<server_name>__<tool_name>` so
 they can't collide with the built-ins or each other, and go through the same
 human-approval flow as every other tool unless added to `safe_tools` or run
 with `--auto-approve`.
+
+A custom server failing to connect doesn't take down the whole session —
+only the built-in server (which provides the core file/shell tools) is
+fatal if it can't start; every other server's connection failure is just
+recorded and shown as ❌ in `/mcp` (see [Session management](#session-management)),
+so the rest of the session still starts normally. Every stdio-transport
+server's stderr — built-in and custom alike — is redirected to
+`--mcp-log-path` (default `mcp_servers.log`) instead of the terminal, so a
+chatty or crashing server's raw debug output doesn't interleave with the
+Rich UI; check that file (not the terminal) when a custom server misbehaves.
 
 There are three ways to add one, and all three accept either a **local
 command** (spawned over stdio, like the built-in server) or a **remote

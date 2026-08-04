@@ -16,6 +16,7 @@ import json
 import os
 import shlex
 import sys
+import time
 from contextlib import AsyncExitStack
 
 from mcp import ClientSession
@@ -213,8 +214,14 @@ class MCPToolClient:
 
     def __init__(self, project_root: str, server_path: str = None,
                  mcp_config_path: str = None, extra_servers: dict = None,
-                 embedding_model: str = "", llm_host: str = None, llm_api_key: str = None):
+                 embedding_model: str = "", llm_host: str = None, llm_api_key: str = None,
+                 mcp_log_path: str = "mcp_servers.log"):
         self.project_root = project_root
+        # stderr from every stdio-transport server (built-in + custom) is
+        # redirected here instead of the terminal — opened lazily in
+        # __aenter__ and closed via self._stack on exit.
+        self.mcp_log_path = mcp_log_path or "mcp_servers.log"
+        self._server_log_file = None
         # Default: run the built-in server as `python -m <package>.mcp_server`
         # rather than by file path — mcp_server.py uses relative imports
         # (it's part of this package), which only resolve when it's launched
@@ -232,13 +239,16 @@ class MCPToolClient:
         self.llm_host = llm_host
         self.llm_api_key = llm_api_key
         self._stack = AsyncExitStack()
-        self._sessions: dict = {}     # server name -> ClientSession
+        self._sessions: dict = {}     # server name -> ClientSession (only successfully-connected ones)
         self._tool_owner: dict = {}   # exposed tool name -> (server name, real tool name)
         self._prompt_owner: dict = {}  # exposed prompt name ("server:prompt") -> (server name, real prompt name)
         self._deferred_servers: set = set()  # server names registered with "defer": true
         self._deferred_tools: dict = {}       # exposed name -> schema, still hidden from the model
         self._revealed: set = set()           # exposed names of deferred tools search_tools has surfaced
         self._tool_embeddings: dict = {}      # exposed name -> embedding vector, cached across searches
+        self._server_specs: dict = {}   # server name -> spec, EVERY configured server (for /mcp, even ones that failed)
+        self._connected_at: dict = {}   # server name -> time.monotonic() at successful connect
+        self._connect_errors: dict = {}  # server name -> error message, for servers that failed to connect
 
     async def _connect(self, name: str, spec: dict) -> ClientSession:
         try:
@@ -258,7 +268,14 @@ class MCPToolClient:
                     command=spec["command"], args=spec.get("args", []),
                     env={**os.environ, **(spec.get("env") or {})},
                 )
-                read, write = await self._stack.enter_async_context(stdio_client(params))
+                self._server_log_file.write(
+                    f"\n=== [{name}] {time.strftime('%Y-%m-%d %H:%M:%S')} "
+                    f"starting: {spec['command']} {' '.join(spec.get('args', []))} ===\n"
+                )
+                self._server_log_file.flush()
+                read, write = await self._stack.enter_async_context(
+                    stdio_client(params, errlog=self._server_log_file)
+                )
             session = await self._stack.enter_async_context(ClientSession(read, write))
             await session.initialize()
             return session
@@ -267,21 +284,59 @@ class MCPToolClient:
             raise RuntimeError(f"Failed to start MCP server {name!r} ({desc}): {e}") from e
 
     async def __aenter__(self):
+        # Opened once per client and reused across every stdio server's
+        # errlog= — closed automatically via self._stack on __aexit__.
+        self._server_log_file = self._stack.enter_context(open(self.mcp_log_path, "a", encoding="utf-8"))
+
         builtin_spec = {
             "command": sys.executable, "args": self.server_args,
             "env": {"AGENT_PROJECT_ROOT": self.project_root},
         }
+        # The built-in server provides the core file/shell tools — a failure
+        # there is fatal, so it still raises. Custom servers are optional
+        # add-ons: one failing shouldn't take down the whole session, so
+        # each is caught individually and recorded for server_status()/the
+        # /mcp REPL command to report, instead of aborting startup.
+        self._server_specs[_BUILTIN] = builtin_spec
         self._sessions[_BUILTIN] = await self._connect(_BUILTIN, builtin_spec)
+        self._connected_at[_BUILTIN] = time.monotonic()
+
         servers = dict(load_mcp_config(self.mcp_config_path)) if self.mcp_config_path else {}
         servers.update(self.extra_servers)  # CLI-specified --mcp-server entries win on name clash
         for name, spec in servers.items():
-            self._sessions[name] = await self._connect(name, spec)
-            if spec.get("defer"):
-                self._deferred_servers.add(name)
+            self._server_specs[name] = spec
+            try:
+                self._sessions[name] = await self._connect(name, spec)
+                self._connected_at[name] = time.monotonic()
+                if spec.get("defer"):
+                    self._deferred_servers.add(name)
+            except RuntimeError as e:
+                self._connect_errors[name] = str(e)
         return self
 
     async def __aexit__(self, *exc_info):
         await self._stack.aclose()
+
+    def server_status(self) -> list:
+        """One entry per configured server (built-in + every custom one),
+        regardless of whether it actually connected, for the /mcp REPL
+        command. Built-in first, then custom servers in configured order.
+        Each entry: {name, connected, connected_for (seconds, None if not
+        connected), error (None if connected), deferred, tool_count, target}."""
+        now = time.monotonic()
+        entries = []
+        for name, spec in self._server_specs.items():
+            connected = name in self._sessions
+            entries.append({
+                "name": "built-in" if name == _BUILTIN else name,
+                "connected": connected,
+                "connected_for": (now - self._connected_at[name]) if connected else None,
+                "error": self._connect_errors.get(name),
+                "deferred": name in self._deferred_servers,
+                "tool_count": sum(1 for owner in self._tool_owner.values() if owner[0] == name),
+                "target": spec.get("url") or f"{spec.get('command', '')} {' '.join(spec.get('args', []))}".strip(),
+            })
+        return entries
 
     async def list_llm_tools(self) -> list:
         """Schemas for tools the LLM is allowed to call, merged across every

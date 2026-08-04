@@ -49,6 +49,10 @@ class AgentConfig:
     compact_keep_last: int = 20
     compact_model: str = ""           # empty = reuse `model` for compaction too
     log_path: str = "agent_run.log"
+    # stderr from every stdio-transport MCP server (built-in + custom) is
+    # redirected here instead of the terminal, so a chatty/crashing server
+    # doesn't interleave raw debug output with the Rich UI.
+    mcp_log_path: str = "mcp_servers.log"
     db_path: str = "agent_sessions.db"  # SQLite file storing session/message history
 
     # Optional path to a Claude-Desktop-style MCP config file
