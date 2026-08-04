@@ -528,6 +528,13 @@ def compacted(num_messages: int, summary_len: int, elapsed: float):
     )
 
 
+def btw_answer(question: str, answer: str):
+    """A /btw side question's answer, printed whenever it's ready — may land
+    in between the running task's own output, so it's boxed distinctly
+    (blue, "💬 /btw") rather than looking like part of that task."""
+    console.print(Panel(Markdown(answer), title=f"💬 /btw: {question}", border_style="blue", expand=False))
+
+
 def warning(text: str):
     console.print(f"[yellow]⚠ {text}[/yellow]")
 
