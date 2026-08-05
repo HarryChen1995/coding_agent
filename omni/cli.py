@@ -57,7 +57,7 @@ _STATIC_COMMANDS = {
     "/sessions": "list saved sessions",
     "/delete ": "delete a saved session — /delete <id-or-name>",
     "/compact": "summarize this session's history down to a briefing",
-    "/btw ": "ask a quick side question without interrupting the running task or touching its history",
+    "/btw ": "ask a quick side question without touching this session's history",
     "/model": "list models available on the LLM server (also populates /model <name> below)",
     "/mcp": "show connected MCP servers, connect time, and tool counts",
 }
@@ -408,6 +408,17 @@ async def _interactive(cfg: AgentConfig, resume: Optional[str], session_name: Op
                 if task == "/mcp":
                     _print_mcp_status(client.server_status())
                     continue
+                if task == "/btw" or task.startswith("/btw "):
+                    # Also handled inline while a task is running (the
+                    # side-reader loop below) — this covers /btw typed at
+                    # the idle top-level prompt, which used to fall through
+                    # and get submitted as a literal task to the agent.
+                    question = task[len("/btw"):].strip()
+                    if question:
+                        await _handle_btw(cfg, question)
+                    else:
+                        typer.echo("Usage: /btw <question>")
+                    continue
                 if task == "/model":
                     try:
                         models = await list_models(cfg.llm_host or None, cfg.llm_api_key or None)
@@ -488,34 +499,6 @@ async def _interactive(cfg: AgentConfig, resume: Optional[str], session_name: Op
                 )
                 previous_sigint = signal.signal(signal.SIGINT, lambda *_: run_task.cancel())
                 try:
-                    # While the turn runs, keep reading the prompt concurrently
-                    # so /btw <question> can be typed without waiting for it to
-                    # finish — a quick, independent side question (see
-                    # _handle_btw), never injected into this turn's messages.
-                    # Anything else typed here is just rejected; queuing a real
-                    # next task while one is in flight is a bigger feature.
-                    side_reader = asyncio.ensure_future(_read_task(prompt_session)) if prompt_session else None
-                    try:
-                        while side_reader is not None and not run_task.done():
-                            done, _ = await asyncio.wait({run_task, side_reader}, return_when=asyncio.FIRST_COMPLETED)
-                            if side_reader not in done:
-                                continue
-                            try:
-                                side_input = (side_reader.result() or "").strip()
-                            except (EOFError, KeyboardInterrupt):
-                                side_input = ""
-                            if side_input.startswith("/btw "):
-                                question = side_input[len("/btw "):].strip()
-                                if question:
-                                    asyncio.ensure_future(_handle_btw(cfg, question))
-                            elif side_input:
-                                typer.echo("A task is already running — /btw <question> for a quick "
-                                           "side question, or wait for it to finish.")
-                            side_reader = None if run_task.done() else asyncio.ensure_future(_read_task(prompt_session))
-                    finally:
-                        if side_reader is not None and not side_reader.done():
-                            side_reader.cancel()
-
                     result = await run_task
                 except asyncio.CancelledError:
                     session_id = agent.session_id or session_id
@@ -544,19 +527,15 @@ async def _interactive(cfg: AgentConfig, resume: Optional[str], session_name: Op
 
 
 async def _handle_btw(cfg: AgentConfig, question: str):
-    """/btw <question>: answer a quick side question without touching the
-    running task's messages or session history — a one-off, stateless
-    chat() call, not persisted anywhere. Runs concurrently with the main
-    task via _interactive()'s side-input loop; prints whenever it finishes,
-    which may land in between the task's own output (the panel/prefix below
-    marks it clearly enough to tell the two apart)."""
+    """/btw <question>: answer a quick side question at the idle prompt
+    without touching this session's messages or history — a one-off,
+    stateless chat() call, not persisted anywhere."""
     try:
         reply = await chat(
             model=cfg.model,
             messages=[
                 {"role": "system", "content": "Answer concisely and directly — this is a quick "
-                                               "aside the user is asking while a longer coding task "
-                                               "runs in the background, not part of that task."},
+                                               "aside the user is asking, unrelated to any coding task."},
                 {"role": "user", "content": question},
             ],
             base_url=cfg.llm_host, api_key=cfg.llm_api_key, timeout=cfg.llm_timeout_s,

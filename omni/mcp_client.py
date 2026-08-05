@@ -19,12 +19,34 @@ import sys
 import time
 from contextlib import AsyncExitStack
 
+from anyio import BrokenResourceError
 from mcp import ClientSession
 from mcp.client.sse import sse_client
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.client.streamable_http import streamablehttp_client
 
 from .llm_client import LLMError, embed
+
+try:
+    BaseExceptionGroup  # builtin on Python 3.11+
+except NameError:
+    from exceptiongroup import BaseExceptionGroup  # backport anyio itself depends on pre-3.11
+
+
+def _is_benign_shutdown_race(exc: BaseException) -> bool:
+    """anyio's stdio_client runs its own stdout-reader task in a task group
+    alongside the ClientSession built on top of it. AsyncExitStack closes
+    contexts in reverse-entry order, so ClientSession's streams get closed
+    BEFORE stdio_client's task group is torn down — if that reader task is
+    mid-`send()` of a just-parsed message at that exact moment, the now-
+    closed receive side raises BrokenResourceError. Harmless: everything is
+    being shut down anyway. Recognizes it whether it surfaces directly or
+    wrapped in an (possibly nested) ExceptionGroup from the task group."""
+    if isinstance(exc, BrokenResourceError):
+        return True
+    if isinstance(exc, BaseExceptionGroup):
+        return all(_is_benign_shutdown_race(e) for e in exc.exceptions)
+    return False
 
 _BUILTIN = "_builtin"
 _TRANSPORTS = ("sse", "streamable_http")
@@ -315,7 +337,11 @@ class MCPToolClient:
         return self
 
     async def __aexit__(self, *exc_info):
-        await self._stack.aclose()
+        try:
+            await self._stack.aclose()
+        except BaseException as e:
+            if not _is_benign_shutdown_race(e):
+                raise
 
     def server_status(self) -> list:
         """One entry per configured server (built-in + every custom one),

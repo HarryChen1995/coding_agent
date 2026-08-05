@@ -529,7 +529,7 @@ class CodingAgent:
                 )
 
             if _HAS_UI:
-                ui.step_display(step, calls)
+                ui.step_display(calls)
             else:
                 for c in calls:
                     print(f"[step {step}] {c['name']}({c['args']}) -> {str(c['result'])[:200]}")

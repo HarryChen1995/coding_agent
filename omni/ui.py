@@ -13,16 +13,25 @@ import zlib
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.formatted_text import HTML
 from rich.console import Console
+from rich.live import Live
 from rich.markdown import Markdown
+from rich.padding import Padding
 from rich.panel import Panel
 from rich.prompt import Confirm
+from rich.spinner import Spinner
 from rich.syntax import Syntax
 from rich.rule import Rule
 from rich.table import Table
 from rich.text import Text
-from rich.tree import Tree
 
 console = Console()
+
+# Claude Code's signature warm rust — the one accent color this UI is built
+# around, instead of the previous mix of cyan/blue/magenta/yellow per
+# widget. Used for the prompt arrow, mascot, spinner, and every "neutral,
+# needs attention" panel border; green/red/yellow stay reserved for actual
+# success/danger/caution semantics (diffs, done, errors).
+ACCENT = "#D97757"
 
 _HUNK_RE = re.compile(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 
@@ -102,7 +111,7 @@ _STATUS_COLOR = {"done": "green", "running": "yellow", "max_steps": "yellow", "e
 
 
 def banner(task: str, model: str):
-    console.print(Rule("[bold cyan]Coding Agent[/bold cyan]"))
+    console.print(Rule(f"[bold {ACCENT}]Coding Agent[/bold {ACCENT}]", style=ACCENT))
     console.print(f"[dim]model:[/dim] {model}")
     console.print(f"[dim]task:[/dim]  {task}\n")
 
@@ -121,7 +130,7 @@ def header(model: str, session_label: str):
     re-printed via this same function (not just shown once at startup)
     whenever either changes: a /model switch, or the session getting a real
     id after the first turn."""
-    mascot = Text(_MASCOT_ART, style="bright_green")
+    mascot = Text(_MASCOT_ART, style=ACCENT)
     info = Text()
     info.append("model:   ", style="bold")
     info.append(f"{model}\n")
@@ -135,7 +144,7 @@ def header(model: str, session_label: str):
     grid.add_column()
     grid.add_row(mascot, info)
 
-    console.print(Panel(grid, title="[bold]Omni Coder[/bold]", border_style="bright_green", expand=True))
+    console.print(Panel(grid, title=f"[bold {ACCENT}]Omni Coder[/bold {ACCENT}]", border_style=ACCENT, expand=True))
 
 
 class SlashCommandCompleter(Completer):
@@ -172,7 +181,7 @@ async def prompt_task_async(session) -> str:
     sys.stdout lazily on every print) is redrawn above the pinned prompt
     instead of corrupting it."""
     console.print(Rule(style="dim"))
-    return await session.prompt_async(HTML("<ansigreen><b>❯</b></ansigreen> "))
+    return await session.prompt_async(HTML(f'<style fg="{ACCENT}"><b>❯</b></style> '))
 
 
 def _format_elapsed(seconds: float) -> str:
@@ -192,7 +201,7 @@ def _format_elapsed(seconds: float) -> str:
 class _TickingSpinner:
     """`with`-usable spinner (same contract as the plain rich Status this
     replaces: sync `__enter__`/`__exit__`, a `.update(label)` method) that
-    also keeps a live "(N.Ns)" elapsed-time suffix ticking on its own via a
+    keeps a live "(N.Ns)" elapsed-time suffix ticking on its own via a
     background asyncio task, instead of only reporting elapsed time once
     after the operation finishes (see elapsed_note/compacted for that).
     Must be entered from within a running event loop — true at every call
@@ -206,7 +215,15 @@ class _TickingSpinner:
     def __init__(self, label: str, interval: float = 0.15):
         self._label = label
         self._interval = interval
-        self._status = console.status(label, spinner="dots")
+        self._spinner = Spinner("dots", text=label, style=ACCENT)
+        # auto_refresh=False plus redirect_stdout/stderr=False: drive every
+        # redraw from this class's own tick loop alone — console.status()'s
+        # default Live spawns its OWN background refresh thread and
+        # redirects stdout independently, a second uncoordinated writer on
+        # top of patch_stdout, which is already the one coordinating writes
+        # against the REPL's prompt.
+        self._live = Live(self._spinner, console=console, transient=True,
+                           auto_refresh=False, redirect_stdout=False, redirect_stderr=False)
         self._task = None
         self._start = None
 
@@ -216,8 +233,10 @@ class _TickingSpinner:
     async def _tick(self):
         try:
             while True:
+                elapsed = _format_elapsed(time.monotonic() - self._start)
+                self._spinner.update(text=f"{self._label} ({elapsed})")
+                self._live.refresh()
                 await asyncio.sleep(self._interval)
-                self._status.update(f"{self._label} ({_format_elapsed(time.monotonic() - self._start)})")
         except asyncio.CancelledError:
             pass
         except Exception:
@@ -225,14 +244,14 @@ class _TickingSpinner:
 
     def __enter__(self):
         self._start = time.monotonic()
-        self._status.__enter__()
+        self._live.__enter__()
         self._task = asyncio.ensure_future(self._tick())
         return self
 
     def __exit__(self, *exc_info):
         if self._task is not None:
             self._task.cancel()
-        return self._status.__exit__(*exc_info)
+        return self._live.__exit__(*exc_info)
 
 
 def thinking(label: str = "Thinking…"):
@@ -240,7 +259,7 @@ def thinking(label: str = "Thinking…"):
     to use around an `await` — rich's status display refreshes on its own
     thread, so it doesn't block the event loop. Ticks a live elapsed-time
     counter for as long as it's open (see _TickingSpinner)."""
-    return _TickingSpinner(f"[bold cyan]{label}[/bold cyan]")
+    return _TickingSpinner(f"[bold {ACCENT}]{label}[/bold {ACCENT}]")
 
 
 def elapsed_note(label: str, seconds: float):
@@ -270,7 +289,7 @@ def intent_panel(intent, existing: dict):
         f"[bold]constraints:[/bold] {constraints_line}"
         f"{confidence}"
     )
-    console.print(Panel(body, title="Parsed Intent", border_style="blue", expand=False))
+    console.print(Panel(body, title="Parsed Intent", border_style=ACCENT, expand=False))
 
 
 def high_risk_warning():
@@ -278,27 +297,6 @@ def high_risk_warning():
         "Approval required for ALL write/shell actions this run, even with --auto-approve.",
         title="⚠ High-risk task detected", border_style="red", expand=False,
     ))
-
-
-_READONLY_TOOLS = {"read_file", "list_dir", "search_files", "glob_files", "git_diff"}
-_WRITE_TOOLS = {"write_file", "edit_file"}
-
-_CATEGORY_COLOR = {
-    "readonly": "cyan",
-    "write": "yellow",
-    "shell": "magenta",
-    "other": "white",
-}
-
-
-def _category(name: str) -> str:
-    if name in _READONLY_TOOLS:
-        return "readonly"
-    if name in _WRITE_TOOLS:
-        return "write"
-    if name == "run_shell":
-        return "shell"
-    return "other"
 
 
 _TOOL_EMOJI = {
@@ -346,8 +344,7 @@ def _call_str(name: str, args) -> str:
     emoji = _emoji_for(name)
     if args is None:
         return f"{emoji} {name}(<malformed arguments>)"
-    color = _CATEGORY_COLOR[_category(name)]
-    return f"{emoji} [{color}]{name}({_format_args(args)})[/{color}]"
+    return f"{emoji} [bold]{name}[/bold]({_format_args(args)})"
 
 
 async def request_approval(name: str, args: dict, client) -> bool:
@@ -374,7 +371,7 @@ async def request_approval(name: str, args: dict, client) -> bool:
     elif name == "run_shell":
         cmd = args.get("command", "")
         console.print(Panel(Syntax(cmd, "bash", theme="ansi_dark"),
-                             title=f"{emoji} run_shell", border_style="magenta"))
+                             title=f"{emoji} run_shell", border_style=ACCENT))
     else:
         console.print(Panel(json.dumps(args, indent=2), title=f"{emoji} {name}", border_style="white"))
 
@@ -385,8 +382,7 @@ _DIFF_TOOLS = {"edit_file", "write_file"}
 
 
 def _result_line(name: str, args, result: str, ok: bool, duration: float = None) -> tuple:
-    """Returns (summary_line, diff_body_or_None) for one tool call's result —
-    shared by the single-call and multi-call (tree) display paths."""
+    """Returns (summary_line, diff_body_or_None) for one tool call's result."""
     icon = "[green]✓[/green]" if ok else "[red]✗[/red]"
     path = args.get("path", "") if isinstance(args, dict) else ""
     diff_body = None
@@ -402,42 +398,29 @@ def _result_line(name: str, args, result: str, ok: bool, duration: float = None)
         summary = f"{path}  +{added} -{removed}"
     else:
         summary = result.splitlines()[0] if result else ""
-    time_suffix = f"  [dim]({_format_elapsed(duration)})[/dim]" if duration is not None else ""
+    time_suffix = f" [dim]· {_format_elapsed(duration)}[/dim]" if duration is not None else ""
     return f"{icon} {summary[:160]}{time_suffix}", diff_body
 
 
-def step_display(step: int, calls: list):
+def step_display(calls: list):
     """`calls` is an ordered list of dicts with name, args (None if the
     model sent malformed JSON), result, ok, duration (seconds, absent for
-    calls that never executed) — every tool call the model made this step,
-    already executed. A single tool call prints as one compact block;
-    several tool calls in the same step (the model ran them in parallel)
-    print as a rich.Tree, so the step number shows once with all of its
-    calls and their results nested under it, instead of repeating
-    "step N" once per call."""
-    if len(calls) == 1:
-        c = calls[0]
-        console.print(f"\n[bold cyan]step {step}[/bold cyan] → {_call_str(c['name'], c['args'])}")
-        line, diff_body = _result_line(c["name"], c["args"], str(c["result"]), c["ok"], c.get("duration"))
-        console.print(f"  {line}")
-        if diff_body is not None:
-            console.print(_render_diff(diff_body))
-        return
-
-    tree = Tree(f"[bold cyan]step {step}[/bold cyan]")
+    calls that never executed) — every tool call the model made this turn,
+    already executed. Each prints as its own bullet (⏺ call, indented ⎿
+    result), flat and sequential regardless of how many ran in parallel —
+    no step numbering or boxed grouping, matching how Claude Code shows a
+    stream of tool calls."""
     for c in calls:
-        branch = tree.add(_call_str(c["name"], c["args"]))
+        console.print(f"[{ACCENT}]⏺[/{ACCENT}] {_call_str(c['name'], c['args'])}")
         line, diff_body = _result_line(c["name"], c["args"], str(c["result"]), c["ok"], c.get("duration"))
-        branch.add(line)
+        console.print(f"  [dim]⎿[/dim]  {line}")
         if diff_body is not None:
-            branch.add(_render_diff(diff_body))
-    console.print()
-    console.print(tree)
+            console.print(Padding(_render_diff(diff_body), (0, 0, 0, 5)))
 
 
 def final_result(text: str):
-    console.print(Rule("[bold green]Done[/bold green]"))
-    console.print(Panel(Markdown(text), border_style="green"))
+    console.print(Rule(f"[bold {ACCENT}]Done[/bold {ACCENT}]", style=ACCENT))
+    console.print(Panel(Markdown(text), border_style=ACCENT))
 
 
 def history_panel(messages: list):
@@ -446,19 +429,19 @@ def history_panel(messages: list):
     same as final_result() — so it's visibly clear context carried over
     instead of silently feeding the model in the background."""
     visible = [m for m in messages if m.get("role") != "system"]
-    console.print(Rule(f"[bold blue]Resumed history — {len(visible)} messages[/bold blue]"))
+    console.print(Rule(f"[bold {ACCENT}]Resumed history — {len(visible)} messages[/bold {ACCENT}]"))
 
     for m in visible:
         role = m.get("role")
         content = (m.get("content") or "").strip()
         if role == "user":
-            console.print(f"\n[bold green]❯[/bold green] {content}")
+            console.print(f"\n[bold {ACCENT}]❯[/bold {ACCENT}] {content}")
         elif role == "assistant" and m.get("tool_calls"):
             calls = ", ".join(f"{c['function']['name']}(…)" for c in m["tool_calls"])
             console.print(f"[dim]  → called {calls}[/dim]")
         elif role == "assistant":
             if content:
-                console.print(Panel(Markdown(content), border_style="cyan", expand=False))
+                console.print(Panel(Markdown(content), border_style=ACCENT, expand=False))
         elif role == "tool":
             summary = content.splitlines()[0] if content else ""
             console.print(f"  [dim]✓ {summary[:150]}[/dim]")
@@ -468,8 +451,8 @@ def history_panel(messages: list):
 
 def sessions_table(sessions: list):
     table = Table(title="Saved Sessions", expand=False)
-    table.add_column("id", style="bold cyan")
-    table.add_column("name", style="bold magenta")
+    table.add_column("id", style=f"bold {ACCENT}")
+    table.add_column("name", style="bold")
     table.add_column("status")
     table.add_column("updated", style="dim")
     table.add_column("model", style="dim")
@@ -529,10 +512,9 @@ def compacted(num_messages: int, summary_len: int, elapsed: float):
 
 
 def btw_answer(question: str, answer: str):
-    """A /btw side question's answer, printed whenever it's ready — may land
-    in between the running task's own output, so it's boxed distinctly
-    (blue, "💬 /btw") rather than looking like part of that task."""
-    console.print(Panel(Markdown(answer), title=f"💬 /btw: {question}", border_style="blue", expand=False))
+    """A /btw side question's answer, boxed distinctly ("💬 /btw" title)
+    rather than looking like part of the surrounding task output."""
+    console.print(Panel(Markdown(answer), title=f"💬 /btw: {question}", border_style=ACCENT, expand=False))
 
 
 def warning(text: str):
